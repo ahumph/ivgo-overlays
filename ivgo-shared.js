@@ -562,7 +562,7 @@ function Ticker({items}) {
       flexShrink:0, padding:'0 20px', height:'100%', display:'flex', alignItems:'center',
       borderRight:`1px solid ${T.rule2}`
     }},
-      React.createElement('img', {src:'../../../brand-assets/IVGO_w.png', style:{height:18, display:'block'}, alt:'IVGO'})
+      React.createElement('img', {src:'../brand-assets/IVGO_w.png', style:{height:18, display:'block'}, alt:'IVGO'})
     ),
     React.createElement('div', {style:{flex:1,overflow:'hidden',position:'relative'}},
       React.createElement('div', {className:'ovl-ticker-track', style:{paddingLeft:24,fontFamily:T.mono,fontSize:11,letterSpacing:'.18em',color:T.ink2,textTransform:'uppercase'}},

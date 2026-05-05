@@ -193,6 +193,8 @@ ivgo-overlays/
 ├── ivgo-shared.js              # shared design tokens and components
 ├── ivgo_obs_setup.lua          # OBS auto-installer script (Lua — built into OBS, no install needed)
 ├── ivgo_obs_setup.py           # OBS auto-installer script (Python — alternative)
+├── brand-assets/
+│   └── IVGO_w.png              # white IVGO logo — used in the ticker bar on every scene
 └── scenes/
     ├── 01-starting-soon.html   # pre-show countdown
     ├── 02-game.html            # game layout chrome (header + ticker)
