@@ -325,19 +325,40 @@ function script_defaults(settings)
     obs.obs_data_set_default_string(settings, "guest_role", "ROLE")
     obs.obs_data_set_default_string(settings, "topic",      "WHY VIDEO GAME MUSIC DESERVES A FULL ORCHESTRA")
     obs.obs_data_set_default_string(settings, "countdown",  "2026-06-06T19:00:00Z")
-    obs.obs_data_set_default_string(settings, "socket_url", "wss://ivgorchestra.com/overlay")
+    obs.obs_data_set_default_string(settings, "socket_url", "wss://ivgorchestra.fly.dev/overlay")
 end
 
 function script_properties()
     local props = obs.obs_properties_create()
 
-    obs.obs_properties_add_text(props, "host_name",  "Host name",                                    obs.OBS_TEXT_DEFAULT)
-    obs.obs_properties_add_text(props, "host_role",  "Host role",                                    obs.OBS_TEXT_DEFAULT)
-    obs.obs_properties_add_text(props, "guest_name", "Guest name  (Two-Cam scene)",                  obs.OBS_TEXT_DEFAULT)
-    obs.obs_properties_add_text(props, "guest_role", "Guest role  (Two-Cam scene)",                  obs.OBS_TEXT_DEFAULT)
-    obs.obs_properties_add_text(props, "topic",      "Interview topic  (Two-Cam scene)",             obs.OBS_TEXT_DEFAULT)
-    obs.obs_properties_add_text(props, "countdown",  "Countdown target — e.g. 2026-06-06T19:00:00Z", obs.OBS_TEXT_DEFAULT)
-    obs.obs_properties_add_text(props, "socket_url", "Socket URL (ws://localhost:4000/overlay for local, wss://ivgorchestra.com/overlay for live)", obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_text(props, "host_name",  "Host name",  obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_text(props, "_host_name_hint",
+        "Shown in the header bar and camera nameplate.",
+        obs.OBS_TEXT_INFO)
+    obs.obs_properties_add_text(props, "host_role",  "Host role",  obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_text(props, "_host_role_hint",
+        "Shown below your name.",
+        obs.OBS_TEXT_INFO)
+    obs.obs_properties_add_text(props, "guest_name", "Guest name", obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_text(props, "_guest_name_hint",
+        "Two-Camera scene only.",
+        obs.OBS_TEXT_INFO)
+    obs.obs_properties_add_text(props, "guest_role", "Guest role", obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_text(props, "_guest_role_hint",
+        "Two-Camera scene only.",
+        obs.OBS_TEXT_INFO)
+    obs.obs_properties_add_text(props, "topic",      "Topic",      obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_text(props, "_topic_hint",
+        "Shown in the topic strip of the Two-Camera scene.",
+        obs.OBS_TEXT_INFO)
+    obs.obs_properties_add_text(props, "countdown",  "Countdown",  obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_text(props, "_countdown_hint",
+        "Format: YYYY-MM-DDTHH:MM:SSZ (UTC). Example: 2026-06-06T18:00:00Z = 7pm BST. Leave blank for static screen.",
+        obs.OBS_TEXT_INFO)
+    obs.obs_properties_add_text(props, "socket_url", "Socket URL", obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_text(props, "_socket_hint",
+        "Local: ws://localhost:4000/overlay   Live: wss://ivgorchestra.fly.dev/overlay",
+        obs.OBS_TEXT_INFO)
 
     obs.obs_properties_add_button(props, "btn", "Create / Refresh Scenes",
         function(_, _) build_all(); return true end)
