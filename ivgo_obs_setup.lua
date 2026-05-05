@@ -38,6 +38,12 @@ local function urlencode(str)
     end))
 end
 
+local function append_socket_url(url, socket_url)
+    if not socket_url or socket_url == "" then return url end
+    local sep = url:find("?") and "&" or "?"
+    return url .. sep .. "socket_url=" .. urlencode(socket_url)
+end
+
 local function scenes_base_url()
     -- script_path() returns the directory containing this .lua file with a
     -- trailing slash, e.g. /Users/adam/ivgo-overlays/ or C:\Users\adam\ivgo-overlays\
@@ -134,11 +140,12 @@ end
 
 -- ── scene builders ────────────────────────────────────────────────────────────
 
-local function build_starting_soon(base, countdown)
+local function build_starting_soon(base, countdown, socket_url)
     local url = base .. "/01-starting-soon.html"
     if countdown ~= "" then
         url = url .. "?target=" .. urlencode(countdown)
     end
+    url = append_socket_url(url, socket_url)
 
     local scene_src = get_scene_source("IVGO · 01 Starting Soon")
     local scene     = obs.obs_scene_from_source(scene_src)
@@ -150,7 +157,7 @@ local function build_starting_soon(base, countdown)
     obs.obs_source_release(scene_src)
 end
 
-local function build_game(base)
+local function build_game(base, socket_url)
     -- Layer order bottom → top:
     --   1. Game Capture         x:88,   y:72,  w:1452, h:824
     --   2. Host Camera          x:1570, y:64,  w:340,  h:191  (chamfered cutout)
@@ -173,19 +180,19 @@ local function build_game(base)
         obs.obs_source_release(cam)
     end
 
-    local overlay = make_browser("IVGO: Game Overlay",  base .. "/02-game.html")
+    local overlay = make_browser("IVGO: Game Overlay",  append_socket_url(base .. "/02-game.html", socket_url))
     if overlay then
         place(scene, overlay, 0, 0, 1920, 1080)
         obs.obs_source_release(overlay)
     end
 
-    local cam_frame = make_browser("IVGO: Cam Outline", base .. "/02-cam-outline.html")
+    local cam_frame = make_browser("IVGO: Cam Outline", append_socket_url(base .. "/02-cam-outline.html", socket_url))
     if cam_frame then
         place(scene, cam_frame, 0, 0, 1920, 1080)
         obs.obs_source_release(cam_frame)
     end
 
-    local chat = make_browser("IVGO: Chat",             base .. "/02-chat.html")
+    local chat = make_browser("IVGO: Chat",             append_socket_url(base .. "/02-chat.html", socket_url))
     if chat then
         place(scene, chat, 0, 0, 1920, 1080)
         obs.obs_source_release(chat)
@@ -194,7 +201,7 @@ local function build_game(base)
     obs.obs_source_release(scene_src)
 end
 
-local function build_camera(base)
+local function build_camera(base, socket_url)
     -- Layer order bottom → top:
     --   1. Host Camera  x:320, y:180, w:1280, h:720  (centred in frame)
     --   2. 03-camera.html chrome + nameplate (transparent)
@@ -208,7 +215,7 @@ local function build_camera(base)
         obs.obs_source_release(cam)
     end
 
-    local overlay = make_browser("IVGO: Camera Overlay", base .. "/03-camera.html")
+    local overlay = make_browser("IVGO: Camera Overlay", append_socket_url(base .. "/03-camera.html", socket_url))
     if overlay then
         place(scene, overlay, 0, 0, 1920, 1080)
         obs.obs_source_release(overlay)
@@ -217,10 +224,10 @@ local function build_camera(base)
     obs.obs_source_release(scene_src)
 end
 
-local function build_brb(base)
+local function build_brb(base, socket_url)
     local scene_src = get_scene_source("IVGO · 04 Be Right Back")
     local scene     = obs.obs_scene_from_source(scene_src)
-    local src       = make_browser("IVGO: BRB", base .. "/04-brb.html")
+    local src       = make_browser("IVGO: BRB", append_socket_url(base .. "/04-brb.html", socket_url))
     if src then
         place(scene, src, 0, 0, 1920, 1080)
         obs.obs_source_release(src)
@@ -228,7 +235,7 @@ local function build_brb(base)
     obs.obs_source_release(scene_src)
 end
 
-local function build_two_cam(base, host, host_role, guest, g_role, topic)
+local function build_two_cam(base, host, host_role, guest, g_role, topic, socket_url)
     -- Layer order bottom → top:
     --   1. Host Camera   x:88,   y:72, w:904, h:858  (left slot)
     --   2. Guest Camera  x:1010, y:72, w:904, h:858  (right slot)
@@ -254,7 +261,7 @@ local function build_two_cam(base, host, host_role, guest, g_role, topic)
                    "&guest="     .. urlencode(guest)      ..
                    "&guestRole=" .. urlencode(g_role)     ..
                    "&topic="     .. urlencode(topic)
-    local overlay = make_browser("IVGO: Two-Cam Overlay", base .. "/05-two-cam.html?" .. params)
+    local overlay = make_browser("IVGO: Two-Cam Overlay", append_socket_url(base .. "/05-two-cam.html?" .. params, socket_url))
     if overlay then
         place(scene, overlay, 0, 0, 1920, 1080)
         obs.obs_source_release(overlay)
@@ -263,10 +270,10 @@ local function build_two_cam(base, host, host_role, guest, g_role, topic)
     obs.obs_source_release(scene_src)
 end
 
-local function build_ending(base)
+local function build_ending(base, socket_url)
     local scene_src = get_scene_source("IVGO · 06 Ending")
     local scene     = obs.obs_scene_from_source(scene_src)
-    local src       = make_browser("IVGO: Ending", base .. "/06-ending.html")
+    local src       = make_browser("IVGO: Ending", append_socket_url(base .. "/06-ending.html", socket_url))
     if src then
         place(scene, src, 0, 0, 1920, 1080)
         obs.obs_source_release(src)
@@ -275,22 +282,23 @@ local function build_ending(base)
 end
 
 local function build_all()
-    local base      = scenes_base_url()
-    local host      = obs.obs_data_get_string(settings_ref, "host_name")
-    local host_role = obs.obs_data_get_string(settings_ref, "host_role")
-    local guest     = obs.obs_data_get_string(settings_ref, "guest_name")
-    local g_role    = obs.obs_data_get_string(settings_ref, "guest_role")
-    local topic     = obs.obs_data_get_string(settings_ref, "topic")
-    local countdown = obs.obs_data_get_string(settings_ref, "countdown")
+    local base       = scenes_base_url()
+    local host       = obs.obs_data_get_string(settings_ref, "host_name")
+    local host_role  = obs.obs_data_get_string(settings_ref, "host_role")
+    local guest      = obs.obs_data_get_string(settings_ref, "guest_name")
+    local g_role     = obs.obs_data_get_string(settings_ref, "guest_role")
+    local topic      = obs.obs_data_get_string(settings_ref, "topic")
+    local countdown  = obs.obs_data_get_string(settings_ref, "countdown")
+    local socket_url = obs.obs_data_get_string(settings_ref, "socket_url")
 
     print("[IVGO] Building scenes from: " .. base)
 
-    build_starting_soon(base, countdown)
-    build_game(base)
-    build_camera(base)
-    build_brb(base)
-    build_two_cam(base, host, host_role, guest, g_role, topic)
-    build_ending(base)
+    build_starting_soon(base, countdown, socket_url)
+    build_game(base, socket_url)
+    build_camera(base, socket_url)
+    build_brb(base, socket_url)
+    build_two_cam(base, host, host_role, guest, g_role, topic, socket_url)
+    build_ending(base, socket_url)
 
     print("[IVGO] Done — 6 scenes created / refreshed.")
 end
@@ -317,6 +325,7 @@ function script_defaults(settings)
     obs.obs_data_set_default_string(settings, "guest_role", "ROLE")
     obs.obs_data_set_default_string(settings, "topic",      "WHY VIDEO GAME MUSIC DESERVES A FULL ORCHESTRA")
     obs.obs_data_set_default_string(settings, "countdown",  "2026-06-06T19:00:00Z")
+    obs.obs_data_set_default_string(settings, "socket_url", "wss://ivgorchestra.com/overlay")
 end
 
 function script_properties()
@@ -328,6 +337,7 @@ function script_properties()
     obs.obs_properties_add_text(props, "guest_role", "Guest role  (Two-Cam scene)",                  obs.OBS_TEXT_DEFAULT)
     obs.obs_properties_add_text(props, "topic",      "Interview topic  (Two-Cam scene)",             obs.OBS_TEXT_DEFAULT)
     obs.obs_properties_add_text(props, "countdown",  "Countdown target — e.g. 2026-06-06T19:00:00Z", obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_text(props, "socket_url", "Socket URL (ws://localhost:4000/overlay for local, wss://ivgorchestra.com/overlay for live)", obs.OBS_TEXT_DEFAULT)
 
     obs.obs_properties_add_button(props, "btn", "Create / Refresh Scenes",
         function(_, _) build_all(); return true end)
