@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>IVGO · 04 Be Right Back</title>
+<meta name="viewport" content="width=1920"/>
+<style>
+  html,body{margin:0;padding:0;background:transparent;width:1920px;height:1080px;overflow:hidden}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="../ivgo-shared.js"></script>
+
+<script>
+(function () {
+  const { Scene, HeaderBar, AudioBars, Ticker, T, TICKER } = window.IVGO;
+  const e = React.createElement;
+
+  function SceneBRB() {
+    return e(Scene, { label: '04 Be Right Back' },
+      e(HeaderBar),
+
+      e('div', { className: 'ovl-anim-rise', style: { position:'absolute', inset:'54px 0 36px 24px', display:'flex', alignItems:'center', justifyContent:'center' }},
+        e('div', { style: { display:'flex', alignItems:'stretch', gap:0, width:1320, height:560 } },
+
+          // Left big block
+          e('div', { className: 'ovl-chamfer', style: {
+            flex:'0 0 56%', background:T.bg2, border:`1px solid ${T.rule2}`,
+            padding:'56px 60px', display:'flex', flexDirection:'column', justifyContent:'space-between'
+          }},
+            e('div', { style:{display:'flex',alignItems:'center',gap:14} },
+              e('div', { style:{width:8,height:8,background:T.accent,boxShadow:`0 0 10px ${T.accentGlow}`} }),
+              e('div', { style:{fontFamily:T.mono,fontSize:12,letterSpacing:'.42em',color:T.accent} }, 'INTERVAL')
+            ),
+            e('div', null,
+              e('div', { style:{fontFamily:T.display,fontSize:170,fontWeight:900,lineHeight:.88,letterSpacing:'-.02em'} },
+                'BE', e('br'), 'RIGHT', e('br'), 'BACK.'
+              ),
+              e('div', { style:{fontFamily:T.mono,fontSize:13,letterSpacing:'.32em',color:T.ink3,textTransform:'uppercase',marginTop:24} }, 'STRETCH · HYDRATE · STAY WITH US')
+            ),
+            e('div', { style:{fontFamily:T.mono,fontSize:11,letterSpacing:'.28em',color:T.ink3} }, 'IVGORCHESTRA.COM · BELFAST')
+          ),
+
+          // Right side stack
+          e('div', { style:{flex:'0 0 44%',display:'flex',flexDirection:'column',gap:18,paddingLeft:18} },
+            e('div', { className:'ovl-chamfer', style:{flex:'1 1 50%',background:T.bg3,border:`1px solid ${T.rule2}`,padding:'24px 28px',display:'flex',flexDirection:'column',justifyContent:'space-between'} },
+              e('div', { style:{fontFamily:T.mono,fontSize:11,letterSpacing:'.32em',color:T.ink3} }, '┤ INTERVAL MUSIC'),
+              e('div', null,
+                e('div', { style:{fontFamily:T.display,fontSize:30,fontWeight:800,letterSpacing:'.02em'} }, 'SHIBUYA - ALL THE WAY'),
+                e('div', { style:{fontFamily:T.mono,fontSize:11,letterSpacing:'.22em',color:T.ink2,marginTop:6,textTransform:'uppercase'} }, 'THE WORLD ENDS WITH YOU · TAKEHARU ISHIMOTO')
+              ),
+              e(AudioBars, { count: 26, height: 32, color: T.ink2 })
+            ),
+            e('div', { className:'ovl-chamfer', style:{flex:'1 1 50%',background:T.bg3,border:`1px solid ${T.rule2}`,padding:'24px 28px',display:'flex',flexDirection:'column',justifyContent:'space-between'} },
+              e('div', { style:{fontFamily:T.mono,fontSize:11,letterSpacing:'.32em',color:T.ink3} }, '┤ NEXT UP'),
+              e('div', null,
+                e('div', { style:{fontFamily:T.mono,fontSize:11,letterSpacing:'.22em',color:T.ink2,marginBottom:6} }, 'UP NEXT · 22 MIN'),
+                e('div', { style:{fontFamily:T.display,fontSize:30,fontWeight:800} }, 'FF7R · ONE-WINGED ANGEL'),
+                e('div', { style:{fontFamily:T.mono,fontSize:11,letterSpacing:'.22em',color:T.ink3,marginTop:6,textTransform:'uppercase'} }, 'NOBUO UEMATSU · ARR. IVGO')
+              )
+            )
+          )
+        )
+      ),
+
+      e(Ticker, { items: TICKER.brb })
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(e(SceneBRB));
+})();
+</script>
+</body>
+</html>

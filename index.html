@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>IVGO Overlays · Preview Index</title>
+<style>
+  body{margin:0;background:#1a1714;color:#e6ecf2;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;padding:32px}
+  h1{font-weight:700;letter-spacing:.04em;font-size:18px;margin:0 0 24px}
+  .grid{display:grid;grid-template-columns:repeat(2, minmax(0,1fr));gap:32px;max-width:1600px}
+  .card{background:#0f1418;border:1px solid rgba(230,236,242,.12);padding:16px}
+  .card h2{font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:rgba(230,236,242,.62);margin:0 0 12px;font-weight:600}
+  .frame{position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;background:#000;border:1px solid rgba(230,236,242,.18)}
+  .frame iframe{position:absolute;top:0;left:0;width:1920px;height:1080px;transform-origin:0 0;border:0;background:transparent}
+  .links{margin-top:10px;font-size:11px;letter-spacing:.08em;color:rgba(230,236,242,.62)}
+  .links a{color:#3aa0ff;text-decoration:none;margin-right:14px}
+  .links a:hover{text-decoration:underline}
+  .note{margin:0 0 24px;padding:14px 18px;background:#0f1418;border-left:3px solid #3aa0ff;font-size:13px;color:rgba(230,236,242,.78);max-width:1600px;line-height:1.55}
+  code{background:#0a0d10;padding:2px 6px;font-family:ui-monospace,"JetBrains Mono",Menlo,monospace;font-size:12px}
+</style>
+</head>
+<body>
+<h1>IVGO Overlays · Preview Index</h1>
+<p class="note">
+  Each card is the actual scene HTML rendered at 1920×1080 inside an iframe, scaled to fit. For OBS, point a Browser Source at the individual <code>.html</code> file. Compositing scenes (Game, Camera, Two Camera) are shown here with <code>?placeholders=1</code> so you can see the dummy gameplay/cam graphics; in OBS, leave that off and the gameplay/webcam capture will show through.
+</p>
+
+<div class="grid">
+  <div class="card">
+    <h2>01 · Starting Soon</h2>
+    <div class="frame" id="f1"><iframe src="scenes/01-starting-soon.html"></iframe></div>
+    <div class="links">
+      <a href="scenes/01-starting-soon.html" target="_blank">Open standalone ↗</a>
+      <a href="scenes/01-starting-soon.html?mins=10&secs=0" target="_blank">10:00 countdown ↗</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>02 · Game (cam + chat)</h2>
+    <div class="frame" id="f2"><iframe src="scenes/02-game.html?placeholders=1"></iframe></div>
+    <div class="links">
+      <a href="scenes/02-game.html?placeholders=1" target="_blank">Open with placeholders ↗</a>
+      <a href="scenes/02-game.html" target="_blank">Open OBS-mode (transparent) ↗</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>03 · Camera Only</h2>
+    <div class="frame" id="f3"><iframe src="scenes/03-camera.html?placeholders=1"></iframe></div>
+    <div class="links">
+      <a href="scenes/03-camera.html?placeholders=1" target="_blank">Open with placeholder ↗</a>
+      <a href="scenes/03-camera.html" target="_blank">Open OBS-mode (transparent) ↗</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>04 · Be Right Back</h2>
+    <div class="frame" id="f4"><iframe src="scenes/04-brb.html"></iframe></div>
+    <div class="links">
+      <a href="scenes/04-brb.html" target="_blank">Open standalone ↗</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>05 · Two Camera</h2>
+    <div class="frame" id="f5"><iframe src="scenes/05-two-cam.html?placeholders=1"></iframe></div>
+    <div class="links">
+      <a href="scenes/05-two-cam.html?placeholders=1" target="_blank">Open with placeholders ↗</a>
+      <a href="scenes/05-two-cam.html" target="_blank">Open OBS-mode (transparent) ↗</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>06 · Ending</h2>
+    <div class="frame" id="f6"><iframe src="scenes/06-ending.html"></iframe></div>
+    <div class="links">
+      <a href="scenes/06-ending.html" target="_blank">Open standalone ↗</a>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Scale each iframe to fit its card width while preserving 1920×1080
+  function fit() {
+    document.querySelectorAll('.frame iframe').forEach(f => {
+      const w = f.parentElement.clientWidth;
+      f.style.transform = 'scale(' + (w / 1920) + ')';
+    });
+  }
+  window.addEventListener('resize', fit);
+  setTimeout(fit, 30);
+</script>
+</body>
+</html>

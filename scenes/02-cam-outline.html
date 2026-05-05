@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>IVGO · 02 Cam Outline</title>
+<meta name="viewport" content="width=1920"/>
+<style>
+  html,body{margin:0;padding:0;background:transparent;width:1920px;height:1080px;overflow:hidden}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="../ivgo-shared.js"></script>
+
+<script>
+(function () {
+  const { MediaPlaceholder, T } = window.IVGO;
+  const e = React.createElement;
+
+  const placeholders = new URLSearchParams(location.search).get('placeholders') === '1';
+
+  function CamOutline() {
+    return e('div', { style:{position:'absolute',inset:0} },
+      e('div', { className: 'ovl-chamfer ovl-anim-rise', style: {
+        position:'absolute', right:10, top:54+10, width:340, height:191,
+        border:`1px solid ${T.rule2}`, overflow:'hidden'
+      }},
+        e(MediaPlaceholder, { label: 'CAM', kind: 'cam', transparent: !placeholders, style:{position:'absolute',inset:0} }),
+        e('div', { style:{position:'absolute',left:10,top:10,display:'flex',alignItems:'center',gap:8} },
+          e('span', { className:'ovl-live-dot' }),
+          e('span', { style:{fontFamily:T.mono,fontSize:10,letterSpacing:'.28em',color:T.ink} }, 'HOST')
+        )
+      )
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(e(CamOutline));
+})();
+</script>
+</body>
+</html>

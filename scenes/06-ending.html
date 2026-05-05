@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>IVGO · 06 Ending</title>
+<meta name="viewport" content="width=1920"/>
+<style>
+  html,body{margin:0;padding:0;background:transparent;width:1920px;height:1080px;overflow:hidden}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="../ivgo-shared.js"></script>
+
+<script>
+(function () {
+  const { Scene, HeaderBar, Ticker, T, TICKER } = window.IVGO;
+  const e = React.createElement;
+
+  function SceneEnding() {
+    return e(Scene, { label: '06 Ending' },
+      e(HeaderBar),
+
+      e('div', { className: 'ovl-anim-rise', style: { position:'absolute', inset:'54px 0 36px 24px', display:'flex', alignItems:'center', justifyContent:'center' }},
+        e('div', { style:{width:1380,display:'flex',flexDirection:'column',alignItems:'stretch',gap:22} },
+
+          e('div', { style:{display:'flex',alignItems:'center',gap:18} },
+            e('div', { style:{width:8,height:8,background:T.accent,boxShadow:`0 0 10px ${T.accentGlow}`} }),
+            e('div', { style:{fontFamily:T.mono,fontSize:13,letterSpacing:'.42em',color:T.accent} }, 'UNTIL NEXT TIME'),
+            e('div', { style:{flex:1,height:1,background:T.rule2} }),
+            e('div', { style:{fontFamily:T.mono,fontSize:11,letterSpacing:'.28em',color:T.ink3} }, '00:02:48:14')
+          ),
+
+          e('div', { style:{display:'grid',gridTemplateColumns:'1.4fr 1fr',gap:24,alignItems:'stretch'} },
+            // Big thanks block
+            e('div', { className:'ovl-chamfer', style:{background:T.bg2,border:`1px solid ${T.rule2}`,padding:'40px 44px'} },
+              e('div', { style:{fontFamily:T.display,fontSize:128,fontWeight:900,lineHeight:.92,letterSpacing:'-.02em'} },
+                'THANK', e('br'), 'YOU.'
+              ),
+              e('div', { style:{fontFamily:T.mono,fontSize:13,letterSpacing:'.32em',color:T.ink3,textTransform:'uppercase',marginTop:20} }, 'NO IRONY · LOTS OF BRASS'),
+              e('div', { style:{marginTop:24,display:'flex',flexDirection:'column',gap:8} },
+                [
+                  ['WEB',      'IVGORCHESTRA.COM'],
+                  ['TWITCH',   '/IRISHVIDEOGAMEORCHESTRA'],
+                  ['YOUTUBE',  '@IRISHVIDEOGAMEORCHESTRA'],
+                  ['INSTAGRAM','@IVGORCHESTRA'],
+                ].map(([k,v]) =>
+                  e('div', {key:k, style:{display:'flex',gap:14,fontFamily:T.mono,fontSize:11,letterSpacing:'.14em'}},
+                    e('span', {style:{color:T.accent,width:72}}, k),
+                    e('span', {style:{color:T.ink2}}, v)
+                  )
+                )
+              )
+            ),
+
+            // Right column: top supporters + next show
+            e('div', { style:{display:'flex',flexDirection:'column',gap:18} },
+              e('div', { className:'ovl-chamfer', style:{background:T.bg3,border:`1px solid ${T.rule2}`,padding:'22px 24px',flex:'1 1 auto'} },
+                e('div', { style:{fontFamily:T.mono,fontSize:11,letterSpacing:'.32em',color:T.ink3,marginBottom:14} }, '┤ NEXT CONCERT'),
+                e('div', { style:{fontFamily:T.display,fontSize:36,fontWeight:900,lineHeight:.9,letterSpacing:'-.01em',marginBottom:10} }, 'PRESS PLAY'),
+                e('div', { style:{fontFamily:T.mono,fontSize:13,letterSpacing:'.22em',color:T.ink2} }, 'MAC BELFAST · 06.06.2026'),
+                e('div', { style:{fontFamily:T.mono,fontSize:11,letterSpacing:'.18em',color:T.accent,marginTop:14} }, 'IVGORCHESTRA.COM')
+              ),
+
+              e('div', { className:'ovl-chamfer', style:{background:T.bg3,border:`1px solid ${T.rule2}`,padding:'22px 24px'} },
+                e('div', { style:{fontFamily:T.mono,fontSize:11,letterSpacing:'.32em',color:T.ink3,marginBottom:8} }, '┤ NEXT BROADCAST'),
+                e('div', { style:{fontFamily:T.display,fontSize:30,fontWeight:800,letterSpacing:'.02em'} }, 'FRIDAY · 20:00 BST'),
+                e('div', { style:{fontFamily:T.mono,fontSize:11,letterSpacing:'.22em',color:T.ink2,marginTop:6,textTransform:'uppercase'} }, 'SECTION SPOTLIGHT · BRASS')
+              )
+            )
+          )
+        )
+      ),
+
+      e(Ticker, { items: TICKER.ending })
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(e(SceneEnding));
+})();
+</script>
+</body>
+</html>

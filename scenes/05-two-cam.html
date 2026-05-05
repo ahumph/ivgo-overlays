@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>IVGO · 05 Two Camera</title>
+<meta name="viewport" content="width=1920"/>
+<style>
+  html,body{margin:0;padding:0;background:transparent;width:1920px;height:1080px;overflow:hidden}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="../ivgo-shared.js"></script>
+
+<script>
+(function () {
+  const { Scene, HeaderBar, MediaPlaceholder, Ticker, T, TICKER } = window.IVGO;
+  const e = React.createElement;
+
+  const params = new URLSearchParams(location.search);
+  const placeholders = params.get('placeholders') === '1';
+
+  // Configurable via URL: ?host=ADAM%20HUMPHREYS&hostRole=ARTISTIC%20DIRECTOR&guest=...&guestRole=...&topic=...
+  const host       = params.get('host')      ?? 'ADAM HUMPHREYS';
+  const hostRole   = params.get('hostRole')  ?? 'ARTISTIC DIRECTOR';
+  const guest      = params.get('guest')     ?? 'NIAMH O\u2019CONNOR';
+  const guestRole  = params.get('guestRole') ?? 'PRINCIPAL VIOLIN';
+  const topic      = params.get('topic')     ?? 'WHY VIDEO GAME MUSIC DESERVES A FULL ORCHESTRA';
+
+  function SceneTwoCam() {
+    const people = [
+      { label:'HOST',  name: host,  role: hostRole },
+      { label:'GUEST', name: guest, role: guestRole },
+    ];
+
+    return e(Scene, { label: '05 Two Camera', transparent: !placeholders },
+      e(HeaderBar),
+
+      e('div', { className:'ovl-anim-rise', style: { position:'absolute', top:54+18, bottom:36+150, left:24, right:24, display:'flex', gap:18 } },
+        people.map((p,i) =>
+          e('div', { key:i, className:'ovl-chamfer', style:{flex:1, position:'relative', border:`1px solid ${T.rule2}`, overflow:'hidden'} },
+            e(MediaPlaceholder, { label: p.label, sub: '1280×720', kind: 'cam', transparent: !placeholders, style:{position:'absolute',inset:0} }),
+            e('div', { style:{position:'absolute',left:18,top:18,display:'flex',alignItems:'center',gap:8} },
+              e('span', { className:'ovl-live-dot' }),
+              e('span', { style:{fontFamily:T.mono,fontSize:10,letterSpacing:'.32em',color:T.ink} }, p.label)
+            ),
+            e('div', { className:'ovl-chamfer-sm', style:{
+              position:'absolute',left:18,bottom:18,
+              background:'rgba(14,20,38,.85)',border:`1px solid ${T.rule2}`,padding:'10px 14px'
+            }},
+              e('div', { style:{fontFamily:T.display,fontSize:18,fontWeight:800,letterSpacing:'.02em'} }, p.name),
+              e('div', { style:{fontFamily:T.mono,fontSize:10,letterSpacing:'.22em',color:T.ink2,marginTop:3} }, p.role)
+            ),
+            e('div', { style:{position:'absolute',right:18,bottom:18,fontFamily:T.mono,fontSize:10,letterSpacing:'.22em',color:T.ink2} }, 'ON MIC')
+          )
+        )
+      ),
+
+      // Centre divider with topic chip
+      e('div', { style:{position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%)',display:'flex',flexDirection:'column',alignItems:'center',gap:8,zIndex:3} },
+        e('div', { className:'ovl-chamfer-sm', style:{background:T.bg,border:`1px solid ${T.accent}`,padding:'10px 14px',boxShadow:`0 0 16px ${T.accentGlow}`} },
+          e('div', { style:{fontFamily:T.mono,fontSize:10,letterSpacing:'.32em',color:T.accent} }, 'TODAY')
+        )
+      ),
+
+      // Topic strip along the bottom
+      e('div', { className:'ovl-chamfer ovl-anim-rise', style: {
+        position:'absolute',left:'50%',transform:'translateX(-50%)',bottom:36+90,
+        background:T.bg2,border:`1px solid ${T.rule2}`,padding:'14px 28px',
+        display:'flex',alignItems:'center',gap:18
+      }},
+        e('div', { style:{fontFamily:T.mono,fontSize:11,letterSpacing:'.32em',color:T.accent} }, 'TODAY'),
+        e('div', { style:{width:1,height:20,background:T.rule2} }),
+        e('div', { style:{fontFamily:T.display,fontSize:26,fontWeight:800,letterSpacing:'.02em'} }, topic),
+        e('div', { style:{width:1,height:20,background:T.rule2} }),
+        e('div', { style:{fontFamily:T.mono,fontSize:11,letterSpacing:'.22em',color:T.ink2} }, '20 MIN')
+      ),
+
+      e(Ticker, { items: TICKER.twoCam })
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(e(SceneTwoCam));
+})();
+</script>
+</body>
+</html>

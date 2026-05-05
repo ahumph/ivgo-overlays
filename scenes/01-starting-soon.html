@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>IVGO · 01 Starting Soon</title>
+<meta name="viewport" content="width=1920"/>
+<style>
+  html,body{margin:0;padding:0;background:transparent;width:1920px;height:1080px;overflow:hidden}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="../ivgo-shared.js"></script>
+
+<script>
+(function () {
+  const { Scene, HeaderBar, AudioBars, Ticker, T, TICKER } = window.IVGO;
+  const e = React.createElement;
+
+  function SceneStartingSoon() {
+    // Countdown — defaults to 4:32, override with ?mins=10&secs=00 or ?target=ISO8601
+    const params = new URLSearchParams(location.search);
+    const initial = (() => {
+      if (params.get('target')) {
+        const dt = new Date(params.get('target')).getTime();
+        const diff = Math.max(0, Math.floor((dt - Date.now())/1000));
+        return { m: Math.floor(diff/60), s: diff%60 };
+      }
+      return {
+        m: parseInt(params.get('mins') ?? '4', 10),
+        s: parseInt(params.get('secs') ?? '32', 10),
+      };
+    })();
+
+    const [t, setT] = React.useState(initial);
+    React.useEffect(() => {
+      const id = setInterval(() => {
+        setT(p => {
+          let s = p.s - 1, m = p.m;
+          if (s < 0) { s = 59; m = Math.max(0, m - 1); }
+          if (m === 0 && s === 0) clearInterval(id);
+          return { m, s };
+        });
+      }, 1000);
+      return () => clearInterval(id);
+    }, []);
+
+    const mm = String(t.m).padStart(2,'0');
+    const ss = String(t.s).padStart(2,'0');
+
+    return e(Scene, { label: '01 Starting Soon' },
+      e(HeaderBar),
+      e('div', { className: 'ovl-anim-rise', style: {
+        position:'absolute', inset:'54px 0 36px 24px',
+        display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:26
+      }},
+        e('div', { style:{textAlign:'center'} },
+          e('div', { style:{fontFamily:T.mono,fontSize:13,letterSpacing:'.42em',color:T.accent,textTransform:'uppercase',marginBottom:18,textShadow:`0 0 12px ${T.accentGlow}`} }, 'IRISH VIDEO GAME ORCHESTRA'),
+          e('div', { style:{fontFamily:T.display,fontSize:140,fontWeight:900,lineHeight:.92,letterSpacing:'-.01em'} }, 'STARTING', e('br'), 'SHORTLY.'),
+          e('div', { style:{fontFamily:T.mono,fontSize:13,letterSpacing:'.34em',color:T.ink3,textTransform:'uppercase',marginTop:18} }, 'NO IRONY · LOTS OF BRASS')
+        ),
+        e('div', { className:'ovl-chamfer', style:{
+          marginTop:8, background:T.bg2, border:`1px solid ${T.rule2}`,
+          padding:'18px 36px', display:'flex', alignItems:'center', gap:30
+        }},
+          e('div', { style:{fontFamily:T.mono,fontSize:11,letterSpacing:'.28em',color:T.ink2} }, 'STARTING IN'),
+          e('div', { style:{display:'flex',alignItems:'baseline',gap:6,fontFamily:T.display,fontWeight:800} },
+            e('span', { style:{fontSize:64} }, mm),
+            e('span', { className:'ovl-blink', style:{fontSize:36,color:T.ink3} }, ':'),
+            e('span', { style:{fontSize:64} }, ss)
+          ),
+          e('div', { style:{height:36,width:1,background:T.rule2} }),
+          e('div', { style:{display:'flex',flexDirection:'column',gap:4} },
+            e('div', { style:{fontFamily:T.mono,fontSize:10,letterSpacing:'.24em',color:T.ink3} }, 'NEXT CONCERT'),
+            e('div', { style:{fontFamily:T.display,fontSize:18,fontWeight:700,letterSpacing:'.05em'} }, '06.06.2026 · MAC BELFAST')
+          )
+        ),
+        e('div', { style:{width:520,height:36,marginTop:8} },
+          e(AudioBars, { count: 28, height: 36, color: T.ink2 })
+        )
+      ),
+      e(Ticker, { items: TICKER.startingSoon })
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(e(SceneStartingSoon));
+})();
+</script>
+</body>
+</html>

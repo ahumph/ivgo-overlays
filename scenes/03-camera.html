@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>IVGO · 03 Camera Only</title>
+<meta name="viewport" content="width=1920"/>
+<style>
+  html,body{margin:0;padding:0;background:transparent;width:1920px;height:1080px;overflow:hidden}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="../ivgo-shared.js"></script>
+
+<script>
+(function () {
+  const { Scene, HeaderBar, MediaPlaceholder, CornerTrim, Ticker, T, TICKER } = window.IVGO;
+  const e = React.createElement;
+
+  const placeholders = new URLSearchParams(location.search).get('placeholders') === '1';
+
+  function SceneCameraOnly() {
+    return e(Scene, { label: '03 Camera Only', transparent: !placeholders },
+      e(HeaderBar),
+
+      // Big chamfered cam centred — transparent cutout in OBS
+      e('div', { className: 'ovl-chamfer ovl-anim-rise', style: {
+        position:'absolute', left:'50%', top:'50%', transform:'translate(-50%,-50%)',
+        width:1280, height:720,
+        border:`1px solid ${T.rule2}`, overflow:'hidden'
+      }},
+        e(MediaPlaceholder, { label: 'HOST CAM', sub: '16:9 · BROADCAST', kind: 'cam', transparent: !placeholders, style:{position:'absolute',inset:0} }),
+
+        // Lower nameplate inside the cam
+        e('div', { style: { position:'absolute', left:24, bottom:24, display:'flex', alignItems:'stretch', gap:0 } },
+          e('div', { className:'ovl-chamfer-sm', style:{ background:'rgba(14,20,38,.85)', border:`1px solid ${T.rule2}`, padding:'12px 18px' } },
+            e('div', { style:{fontFamily:T.mono,fontSize:10,letterSpacing:'.32em',color:T.ink3} }, '┤ HOST'),
+            e('div', { style:{fontFamily:T.display,fontSize:26,fontWeight:800,letterSpacing:'.02em',marginTop:2} }, 'ADAM HUMPHREYS'),
+            e('div', { style:{fontFamily:T.mono,fontSize:10,letterSpacing:'.22em',color:T.ink2,marginTop:4} }, 'ARTISTIC DIRECTOR · IVGO')
+          )
+        ),
+
+        e('div', { style:{position:'absolute',right:24,top:24,fontFamily:T.mono,fontSize:10,letterSpacing:'.32em',color:T.ink2} }, 'IVGORCHESTRA.COM'),
+        e(CornerTrim, {pos:'tl'}), e(CornerTrim, {pos:'tr'}),
+        e(CornerTrim, {pos:'bl'}), e(CornerTrim, {pos:'br'})
+      ),
+
+      e(Ticker, { items: TICKER.camera })
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(e(SceneCameraOnly));
+})();
+</script>
+</body>
+</html>
