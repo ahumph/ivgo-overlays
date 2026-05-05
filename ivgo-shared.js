@@ -41,6 +41,180 @@ const T = {
   display:   '"Archivo", "Helvetica Neue", Helvetica, Arial, sans-serif',
 };
 
+// ── EventBus ──────────────────────────────────────────────────────────────
+// Connects to Phoenix Channel overlay:events and dispatches Twitch events.
+// Usage: window.IVGO.bus.on("channel.follow", ({user_name}) => ...)
+// Requires ?socket_url=wss://... param or defaults to same host /overlay path.
+// No-ops gracefully when Phoenix is not available.
+
+const _bus = (function () {
+  const listeners = {};
+  let _channel = null;
+
+  function on(event, fn) {
+    listeners[event] = listeners[event] || [];
+    listeners[event].push(fn);
+  }
+
+  function dispatch(event, payload) {
+    (listeners[event] || []).forEach(fn => {
+      try { fn(payload); } catch (e) { console.error('[IVGO bus]', e); }
+    });
+  }
+
+  function connect() {
+    if (typeof Phoenix === 'undefined') return;
+
+    const params = new URLSearchParams(location.search);
+    const socketUrl = params.get('socket_url') || (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/overlay';
+
+    try {
+      const socket = new Phoenix.Socket(socketUrl, {});
+      socket.connect();
+
+      _channel = socket.channel('overlay:events', {});
+      ['channel.follow', 'channel.subscribe', 'channel.subscription.gift', 'channel.cheer'].forEach(type => {
+        _channel.on(type, payload => dispatch(type, payload));
+      });
+      _channel.join()
+        .receive('ok', () => console.log('[IVGO bus] joined overlay:events'))
+        .receive('error', e => console.warn('[IVGO bus] join error', e));
+
+      socket.onError(() => console.warn('[IVGO bus] socket error'));
+    } catch (e) {
+      console.warn('[IVGO bus] connect failed', e);
+    }
+  }
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('DOMContentLoaded', connect);
+  }
+
+  return { on, dispatch };
+})();
+
+// ── ToastQueue ────────────────────────────────────────────────────────────
+// Bottom-left toast notifications. Max 3 visible, FIFO queue, 5s auto-dismiss.
+// Mounts a container div into document.body on first use.
+// Usage: window.IVGO.toast({ type: 'follow'|'sub'|'gift'|'cheer', ... })
+
+const _toast = (function () {
+  let container = null;
+  const queue = [];
+  let visible = 0;
+  const MAX_VISIBLE = 3;
+  const DISMISS_MS = 5000;
+
+  function getContainer() {
+    if (container) return container;
+    container = document.createElement('div');
+    container.style.cssText = 'position:fixed;bottom:24px;left:24px;display:flex;flex-direction:column-reverse;gap:8px;z-index:9999;pointer-events:none';
+    document.body.appendChild(container);
+    return container;
+  }
+
+  function show(item) {
+    visible++;
+    const el = document.createElement('div');
+    el.className = 'ovl-chamfer-sm ovl-toast-enter';
+    el.style.cssText = [
+      'background:rgba(17,17,20,.92)',
+      'border:1px solid ' + (item.accent || T.rule2),
+      'padding:12px 16px',
+      'font-family:' + T.mono,
+      'font-size:11px',
+      'letter-spacing:.16em',
+      'color:' + T.ink,
+      'min-width:220px',
+      'max-width:320px',
+      'pointer-events:none',
+      'box-shadow:0 4px 24px rgba(0,0,0,.5)',
+    ].join(';');
+
+    const labelEl = document.createElement('div');
+    labelEl.style.cssText = 'color:' + (item.accent || T.accent) + ';font-size:9px;letter-spacing:.32em;margin-bottom:4px';
+    labelEl.textContent = item.label;
+
+    const line1El = document.createElement('div');
+    line1El.style.cssText = 'color:' + T.ink;
+    line1El.textContent = item.line1;
+
+    el.appendChild(labelEl);
+    el.appendChild(line1El);
+
+    if (item.line2) {
+      const line2El = document.createElement('div');
+      line2El.style.cssText = 'color:' + T.ink3 + ';font-size:10px;margin-top:2px';
+      line2El.textContent = item.line2;
+      el.appendChild(line2El);
+    }
+
+    getContainer().appendChild(el);
+
+    setTimeout(() => {
+      el.style.opacity = '0';
+      el.style.transition = 'opacity 400ms';
+      setTimeout(() => {
+        el.remove();
+        visible--;
+        if (queue.length > 0) show(queue.shift());
+      }, 400);
+    }, DISMISS_MS);
+  }
+
+  function push(item) {
+    if (visible < MAX_VISIBLE) {
+      show(item);
+    } else {
+      queue.push(item);
+    }
+  }
+
+  function toast(opts) {
+    const map = {
+      follow: {
+        label: 'NEW FOLLOWER',
+        line1: opts.user_name || opts.user_login || 'Someone',
+        line2: 'followed the channel',
+        accent: T.accent,
+      },
+      sub: {
+        label: 'NEW SUBSCRIBER' + (opts.tier ? ' \u00b7 ' + opts.tier : ''),
+        line1: opts.user_name || opts.user_login || 'Someone',
+        line2: opts.is_gift ? 'gifted sub' : null,
+        accent: '#a855f7',
+      },
+      gift: {
+        label: 'GIFT SUBS',
+        line1: (opts.user_name || 'Someone') + ' gifted ' + (opts.total || 1) + ' sub' + ((opts.total || 1) > 1 ? 's' : ''),
+        line2: opts.tier || null,
+        accent: '#a855f7',
+      },
+      cheer: {
+        label: 'BITS',
+        line1: (opts.user_name || 'Anonymous') + ' cheered ' + (opts.bits || '?') + ' bits',
+        line2: opts.message ? opts.message.slice(0, 60) : null,
+        accent: T.amber,
+      },
+    };
+
+    const item = map[opts.type];
+    if (item) push(item);
+  }
+
+  return { toast };
+})();
+
+// Auto-wire Twitch events to toasts
+if (typeof document !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', function () {
+    _bus.on('channel.follow', p => _toast.toast({ type: 'follow', ...p }));
+    _bus.on('channel.subscribe', p => _toast.toast({ type: 'sub', ...p }));
+    _bus.on('channel.subscription.gift', p => _toast.toast({ type: 'gift', ...p }));
+    _bus.on('channel.cheer', p => _toast.toast({ type: 'cheer', ...p }));
+  });
+}
+
 // Inject overlay CSS once
 if (typeof document !== 'undefined' && !document.getElementById('ovl-styles')) {
   const s = document.createElement('style');
@@ -118,6 +292,9 @@ if (typeof document !== 'undefined' && !document.getElementById('ovl-styles')) {
     .ovl-anim-header { animation: ovl-header .55s cubic-bezier(.2,.8,.2,1) .12s both; }
     .ovl-anim-rise   { animation: ovl-rise   .55s cubic-bezier(.2,.8,.2,1) .24s both; }
     .ovl-anim-tick   { animation: ovl-tick   .55s cubic-bezier(.2,.8,.2,1) .36s both; }
+
+    @keyframes ovl-toast-in { from{translate:0 12px;opacity:0} to{translate:0 0;opacity:1} }
+    .ovl-toast-enter { animation: ovl-toast-in 250ms cubic-bezier(.2,.8,.2,1) both; }
   `;
   document.head.appendChild(s);
 }
@@ -411,4 +588,6 @@ window.IVGO = {
   Wordmark, WeeMan, LiveBadge, Chip, MetaLine, AudioBars,
   UtilityRail, CornerTrim, MediaPlaceholder,
   NowPlayingStrip, ChatPanel, GoalBar, Ticker, HeaderBar, Scene,
+  bus: _bus,
+  toast: _toast.toast,
 };
