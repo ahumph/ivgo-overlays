@@ -66,6 +66,7 @@ const _bus = (function () {
     if (typeof Phoenix === 'undefined') return;
 
     const params = new URLSearchParams(location.search);
+    if (params.get('toasts') === '0') return;
     const socketUrl = params.get('socket_url') || (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/overlay';
 
     try {
@@ -102,18 +103,68 @@ const _toast = (function () {
   let container = null;
   const queue = [];
   let visible = 0;
+  let _timer = null;
+  let _lastShowTime = 0;
   const MAX_VISIBLE = 3;
   const DISMISS_MS = 5000;
+  const STAGGER_MS = 2000;
 
   function getContainer() {
     if (container) return container;
     container = document.createElement('div');
-    container.style.cssText = 'position:fixed;bottom:24px;left:24px;display:flex;flex-direction:column-reverse;gap:8px;z-index:9999;pointer-events:none';
+    container.style.cssText = 'position:fixed;bottom:46px;left:10px;display:flex;flex-direction:column-reverse;gap:8px;z-index:9999;pointer-events:none';
     document.body.appendChild(container);
     return container;
   }
 
+  // One timer running at a time. Wait enforces STAGGER_MS since last show,
+  // regardless of whether items were pre-queued or arrived one by one.
+  function scheduleNext() {
+    if (_timer !== null) return;
+    if (queue.length === 0) return;
+    const elapsed = Date.now() - _lastShowTime;
+    const wait = _lastShowTime === 0 ? 0 : Math.max(0, STAGGER_MS - elapsed);
+    _timer = setTimeout(function () {
+      _timer = null;
+      if (queue.length === 0) return;
+      if (visible >= MAX_VISIBLE) evictOldest();
+      show(queue.shift());
+      scheduleNext();
+    }, wait);
+  }
+
+  // Remove the oldest (topmost) toast immediately to make room for a new one.
+  function evictOldest() {
+    const c = getContainer();
+    const oldest = c.lastChild; // lastChild = oldest in DOM = visually topmost in column-reverse
+    if (!oldest) return;
+    if (oldest._dismissTimer) clearTimeout(oldest._dismissTimer);
+    oldest.remove();
+    visible--;
+  }
+
+  // Animate a toast out, decrement visible, and drain queue.
+  function dismissEl(el) {
+    if (!el.parentNode) return; // already evicted
+    const h = el.offsetHeight;
+    el.style.transition = 'opacity 300ms, max-height 300ms ease-in, padding 300ms ease-in';
+    el.style.maxHeight = h + 'px';
+    requestAnimationFrame(function () {
+      el.style.opacity = '0';
+      el.style.maxHeight = '0';
+      el.style.paddingTop = '0';
+      el.style.paddingBottom = '0';
+    });
+    setTimeout(function () {
+      if (!el.parentNode) return;
+      el.remove();
+      visible--;
+      scheduleNext();
+    }, 300);
+  }
+
   function show(item) {
+    _lastShowTime = Date.now();
     visible++;
     const el = document.createElement('div');
     el.className = 'ovl-chamfer-sm ovl-toast-enter';
@@ -129,6 +180,8 @@ const _toast = (function () {
       'max-width:320px',
       'pointer-events:none',
       'box-shadow:0 4px 24px rgba(0,0,0,.5)',
+      'overflow:hidden',
+      'max-height:200px',
     ].join(';');
 
     const labelEl = document.createElement('div');
@@ -149,25 +202,16 @@ const _toast = (function () {
       el.appendChild(line2El);
     }
 
-    getContainer().appendChild(el);
+    // Prepend so newest sits at bottom; older ones pushed upward by column-reverse
+    const c = getContainer();
+    c.insertBefore(el, c.firstChild);
 
-    setTimeout(() => {
-      el.style.opacity = '0';
-      el.style.transition = 'opacity 400ms';
-      setTimeout(() => {
-        el.remove();
-        visible--;
-        if (queue.length > 0) show(queue.shift());
-      }, 400);
-    }, DISMISS_MS);
+    el._dismissTimer = setTimeout(function () { dismissEl(el); }, DISMISS_MS);
   }
 
   function push(item) {
-    if (visible < MAX_VISIBLE) {
-      show(item);
-    } else {
-      queue.push(item);
-    }
+    queue.push(item);
+    scheduleNext();
   }
 
   function toast(opts) {

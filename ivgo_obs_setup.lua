@@ -71,7 +71,7 @@ local function make_browser(name, url)
     -- Caller must obs.obs_source_release() the result.
     local existing = obs.obs_get_source_by_name(name)
     if existing then
-        local d = obs.obs_data_create()
+        local d = obs.obs_source_get_settings(existing)
         obs.obs_data_set_string(d, "url", url)
         obs.obs_source_update(existing, d)
         obs.obs_data_release(d)
@@ -186,13 +186,13 @@ local function build_game(base, socket_url)
         obs.obs_source_release(overlay)
     end
 
-    local cam_frame = make_browser("IVGO: Cam Outline", append_socket_url(base .. "/02-cam-outline.html", socket_url))
+    local cam_frame = make_browser("IVGO: Cam Outline", append_socket_url(base .. "/02-cam-outline.html?toasts=0", socket_url))
     if cam_frame then
         place(scene, cam_frame, 0, 0, 1920, 1080)
         obs.obs_source_release(cam_frame)
     end
 
-    local chat = make_browser("IVGO: Chat",             append_socket_url(base .. "/02-chat.html", socket_url))
+    local chat = make_browser("IVGO: Chat",             append_socket_url(base .. "/02-chat.html?toasts=0", socket_url))
     if chat then
         place(scene, chat, 0, 0, 1920, 1080)
         obs.obs_source_release(chat)
