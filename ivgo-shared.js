@@ -346,13 +346,17 @@ const _alrighty = (function () {
   return { trigger };
 })();
 
-// Auto-wire Twitch events to toasts
+// Auto-wire Twitch events to toasts and alrighty video
 if (typeof document !== 'undefined') {
   document.addEventListener('DOMContentLoaded', function () {
     _bus.on('channel.follow', p => _toast.toast({ type: 'follow', ...p }));
     _bus.on('channel.subscribe', p => _toast.toast({ type: 'sub', ...p }));
     _bus.on('channel.subscription.gift', p => _toast.toast({ type: 'gift', ...p }));
     _bus.on('channel.cheer', p => _toast.toast({ type: 'cheer', ...p }));
+
+    _bus.on('channel.follow',            () => _alrighty.trigger());
+    _bus.on('channel.subscribe',         () => _alrighty.trigger());
+    _bus.on('channel.subscription.gift', () => _alrighty.trigger());
   });
 }
 
