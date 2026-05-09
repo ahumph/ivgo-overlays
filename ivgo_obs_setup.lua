@@ -54,6 +54,71 @@ local function scenes_base_url()
     return prefix .. dir .. "scenes"
 end
 
+-- ── git ──────────────────────────────────────────────────────────────────────
+
+local function repo_dir()
+    -- script_path() ends with a separator; strip it for `git -C` and normalise
+    -- backslashes to forward slashes (git on Windows accepts either).
+    return script_path():gsub("\\", "/"):gsub("/$", "")
+end
+
+local function run_git(args)
+    -- Run `git <args>` in the repo dir. Returns ok, output (stdout+stderr).
+    -- GIT_TERMINAL_PROMPT=0 makes git fail fast instead of blocking on a
+    -- credential prompt (which would freeze OBS — io.popen has no stdin).
+    -- io.popen on Windows already wraps in cmd.exe /c, so cmd-syntax is fine.
+    local dir = repo_dir()
+    local cmd
+    if is_windows() then
+        cmd = string.format(
+            'set GIT_TERMINAL_PROMPT=0&& git -C "%s" %s 2>&1', dir, args)
+    else
+        cmd = string.format(
+            'GIT_TERMINAL_PROMPT=0 git -C "%s" %s 2>&1', dir, args)
+    end
+    local handle = io.popen(cmd, "r")
+    if not handle then return false, "could not run git" end
+    local output = handle:read("*a") or ""
+    local ok = handle:close()
+    return ok and true or false, output
+end
+
+local function pull_latest()
+    -- Stash any local edits (including untracked), fast-forward, then pop —
+    -- so iterating on scenes/*.html between streams doesn't block the pull.
+    -- The stash pop is always attempted, even if the pull fails, so a
+    -- network blip can never strand local work in the stash list.
+    print("[IVGO] Pulling latest…")
+
+    local ok_stash, out_stash = run_git('stash push -u -m "ivgo-pull-autostash"')
+    if not ok_stash then
+        print("[IVGO] git stash failed — aborting pull:\n" .. out_stash)
+        return false
+    end
+    -- `stash push` with a clean tree returns 0 and prints "No local changes
+    -- to save"; we only pop if a stash was actually created.
+    local stashed = not out_stash:find("No local changes to save", 1, true)
+
+    local ok_pull, out_pull = run_git("pull --ff-only")
+    if out_pull ~= "" then print("[IVGO] git pull:\n" .. out_pull) end
+    if not ok_pull then
+        print("[IVGO] git pull failed — continuing with local files.")
+    end
+
+    if stashed then
+        local ok_pop, out_pop = run_git("stash pop")
+        if not ok_pop then
+            print("[IVGO] git stash pop hit a conflict — your local edits " ..
+                  "are still in the stash. Run `git stash list` and resolve " ..
+                  "manually:\n" .. out_pop)
+        elseif out_pop ~= "" then
+            print("[IVGO] git stash pop:\n" .. out_pop)
+        end
+    end
+
+    return ok_pull
+end
+
 -- ── OBS source / scene helpers ────────────────────────────────────────────────
 
 local function get_scene_source(name)
@@ -96,6 +161,27 @@ local function make_capture(name, kind)
     local existing = obs.obs_get_source_by_name(name)
     if existing then return existing end
     local d = obs.obs_data_create()
+    local src = obs.obs_source_create(kind, name, d, nil)
+    obs.obs_data_release(d)
+    return src
+end
+
+local function make_game_capture(name)
+    -- Like make_capture but ensures the game's audio is routed through the
+    -- source. capture_audio is updated on existing sources too, so re-running
+    -- the installer turns audio on for sources created before this change.
+    -- (display_capture on macOS ignores capture_audio; harmless to set.)
+    local kind = game_type()
+    local existing = obs.obs_get_source_by_name(name)
+    if existing then
+        local d = obs.obs_source_get_settings(existing)
+        obs.obs_data_set_bool(d, "capture_audio", true)
+        obs.obs_source_update(existing, d)
+        obs.obs_data_release(d)
+        return existing
+    end
+    local d = obs.obs_data_create()
+    obs.obs_data_set_bool(d, "capture_audio", true)
     local src = obs.obs_source_create(kind, name, d, nil)
     obs.obs_data_release(d)
     return src
@@ -168,7 +254,7 @@ local function build_game(base, socket_url)
     local scene_src = get_scene_source("IVGO · 02 Game")
     local scene     = obs.obs_scene_from_source(scene_src)
 
-    local game = make_capture("IVGO: Game Capture", game_type())
+    local game = make_game_capture("IVGO: Game Capture")
     if game then
         place(scene, game, 88, 72, 1452, 824)
         obs.obs_source_release(game)
@@ -362,6 +448,9 @@ function script_properties()
 
     obs.obs_properties_add_button(props, "btn", "Create / Refresh Scenes",
         function(_, _) build_all(); return true end)
+
+    obs.obs_properties_add_button(props, "btn_pull", "Pull latest & refresh",
+        function(_, _) pull_latest(); build_all(); return true end)
 
     return props
 end
