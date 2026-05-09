@@ -266,6 +266,8 @@ const _alrighty = (function () {
     if (containerEl) return;
     containerEl = document.createElement('div');
     containerEl.className = 'ovl-chamfer-sm';
+    // z-index:9 sits above HeaderBar (5) and Ticker (6) but below toasts
+    // (9999) so a toast popping during the easter-egg play overlays cleanly.
     containerEl.style.cssText = [
       'position:fixed',
       'top:64px',
@@ -298,8 +300,18 @@ const _alrighty = (function () {
     if (containerEl) containerEl.style.opacity = '0';
   }
 
+  function reset() {
+    playing = false;
+    pending = false;
+    hide();
+  }
+
   function onEnded() {
     if (pending) {
+      // Drain play: `playing` stays true through the loop — we never exited
+      // the playing state, just restarted the video. trigger() calls during
+      // this drain still see playing=true and queue another pending=true,
+      // giving the "one drain covers any number of queued events" semantic.
       pending = false;
       videoEl.currentTime = 0;
       videoEl.play().catch(onPlayReject);
@@ -311,16 +323,12 @@ const _alrighty = (function () {
 
   function onError(e) {
     console.warn('[IVGO alrighty] video error', e);
-    playing = false;
-    pending = false;
-    hide();
+    reset();
   }
 
   function onPlayReject(err) {
     console.warn('[IVGO alrighty] play() rejected:', err);
-    playing = false;
-    pending = false;
-    hide();
+    reset();
   }
 
   function trigger() {
