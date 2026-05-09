@@ -249,6 +249,95 @@ const _toast = (function () {
   return { toast };
 })();
 
+// ── AlrightyBox ───────────────────────────────────────────────────────────
+// Top-left video easter egg. Plays media/alrighty-then.mp4 with audio
+// whenever channel.follow / channel.subscribe / channel.subscription.gift
+// fires. If events arrive while playing, drains them with one follow-up
+// play (pending-flag model — N events during one play → exactly 2 plays).
+
+const _alrighty = (function () {
+  const SRC = '../media/alrighty-then.mp4';
+  let containerEl = null;
+  let videoEl = null;
+  let playing = false;
+  let pending = false;
+
+  function ensureMounted() {
+    if (containerEl) return;
+    containerEl = document.createElement('div');
+    containerEl.className = 'ovl-chamfer-sm';
+    containerEl.style.cssText = [
+      'position:fixed',
+      'top:64px',
+      'left:10px',
+      'width:480px',
+      'height:270px',
+      'opacity:0',
+      'pointer-events:none',
+      'transition:opacity 250ms ease',
+      'z-index:9',
+      'border:1px solid ' + T.rule2,
+      'background:#000',
+      'overflow:hidden',
+      'box-shadow:0 4px 24px rgba(0,0,0,.5)',
+    ].join(';');
+
+    videoEl = document.createElement('video');
+    videoEl.src = SRC;
+    videoEl.preload = 'auto';
+    videoEl.playsInline = true;
+    videoEl.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
+    videoEl.addEventListener('ended', onEnded);
+    videoEl.addEventListener('error', onError);
+
+    containerEl.appendChild(videoEl);
+    document.body.appendChild(containerEl);
+  }
+
+  function hide() {
+    if (containerEl) containerEl.style.opacity = '0';
+  }
+
+  function onEnded() {
+    if (pending) {
+      pending = false;
+      videoEl.currentTime = 0;
+      videoEl.play().catch(onPlayReject);
+      return;
+    }
+    playing = false;
+    hide();
+  }
+
+  function onError(e) {
+    console.warn('[IVGO alrighty] video error', e);
+    playing = false;
+    pending = false;
+    hide();
+  }
+
+  function onPlayReject(err) {
+    console.warn('[IVGO alrighty] play() rejected:', err);
+    playing = false;
+    pending = false;
+    hide();
+  }
+
+  function trigger() {
+    ensureMounted();
+    if (playing) {
+      pending = true;
+      return;
+    }
+    playing = true;
+    containerEl.style.opacity = '1';
+    videoEl.currentTime = 0;
+    videoEl.play().catch(onPlayReject);
+  }
+
+  return { trigger };
+})();
+
 // Auto-wire Twitch events to toasts
 if (typeof document !== 'undefined') {
   document.addEventListener('DOMContentLoaded', function () {
@@ -634,4 +723,5 @@ window.IVGO = {
   NowPlayingStrip, ChatPanel, GoalBar, Ticker, HeaderBar, Scene,
   bus: _bus,
   toast: _toast.toast,
+  alrighty: _alrighty.trigger,
 };
