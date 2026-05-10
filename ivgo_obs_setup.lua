@@ -84,39 +84,21 @@ local function run_git(args)
 end
 
 local function pull_latest()
-    -- Stash any local edits (including untracked), fast-forward, then pop —
-    -- so iterating on scenes/*.html between streams doesn't block the pull.
-    -- The stash pop is always attempted, even if the pull fails, so a
-    -- network blip can never strand local work in the stash list.
+    -- `--rebase` replays any local commits on top of the upstream branch so
+    -- pulling doesn't fail when the user has committed work locally.
+    -- `--autostash` shelves uncommitted edits before the rebase and restores
+    -- them after, so iterating on scenes/*.html between streams Just Works.
+    -- If the rebase hits a conflict, git leaves the repo mid-rebase — we
+    -- surface that in the log and the user resolves with `git status` /
+    -- `git rebase --abort` from a terminal.
     print("[IVGO] Pulling latest…")
-
-    local ok_stash, out_stash = run_git('stash push -u -m "ivgo-pull-autostash"')
-    if not ok_stash then
-        print("[IVGO] git stash failed — aborting pull:\n" .. out_stash)
+    local ok, output = run_git("pull --rebase --autostash")
+    if output ~= "" then print("[IVGO] git pull:\n" .. output) end
+    if not ok then
+        print("[IVGO] git pull failed — check `git status` and resolve manually.")
         return false
     end
-    -- `stash push` with a clean tree returns 0 and prints "No local changes
-    -- to save"; we only pop if a stash was actually created.
-    local stashed = not out_stash:find("No local changes to save", 1, true)
-
-    local ok_pull, out_pull = run_git("pull --ff-only")
-    if out_pull ~= "" then print("[IVGO] git pull:\n" .. out_pull) end
-    if not ok_pull then
-        print("[IVGO] git pull failed — continuing with local files.")
-    end
-
-    if stashed then
-        local ok_pop, out_pop = run_git("stash pop")
-        if not ok_pop then
-            print("[IVGO] git stash pop hit a conflict — your local edits " ..
-                  "are still in the stash. Run `git stash list` and resolve " ..
-                  "manually:\n" .. out_pop)
-        elseif out_pop ~= "" then
-            print("[IVGO] git stash pop:\n" .. out_pop)
-        end
-    end
-
-    return ok_pull
+    return true
 end
 
 -- ── OBS source / scene helpers ────────────────────────────────────────────────
@@ -170,20 +152,25 @@ local function make_game_capture(name)
     -- Like make_capture but ensures the game's audio is routed through the
     -- source. capture_audio is updated on existing sources too, so re-running
     -- the installer turns audio on for sources created before this change.
+    -- Volume is reset to -12 dBFS on every refresh — game audio at 0 dB clips
+    -- against voice; -12 dB leaves headroom for chat toasts and the host mic.
     -- (display_capture on macOS ignores capture_audio; harmless to set.)
     local kind = game_type()
+    local mul = 10 ^ (-12 / 20)   -- -12 dBFS as linear multiplier (~0.2512)
     local existing = obs.obs_get_source_by_name(name)
     if existing then
         local d = obs.obs_source_get_settings(existing)
         obs.obs_data_set_bool(d, "capture_audio", true)
         obs.obs_source_update(existing, d)
         obs.obs_data_release(d)
+        obs.obs_source_set_volume(existing, mul)
         return existing
     end
     local d = obs.obs_data_create()
     obs.obs_data_set_bool(d, "capture_audio", true)
     local src = obs.obs_source_create(kind, name, d, nil)
     obs.obs_data_release(d)
+    if src then obs.obs_source_set_volume(src, mul) end
     return src
 end
 
@@ -245,7 +232,7 @@ end
 
 local function build_game(base, socket_url)
     -- Layer order bottom → top:
-    --   1. Game Capture         x:88,   y:72,  w:1452, h:824
+    --   1. Game Capture         x:0,    y:0,   w:1920, h:1080 (fit to screen)
     --   2. Host Camera          x:1570, y:64,  w:340,  h:191  (chamfered cutout)
     --   3. 02-game.html         header + ticker chrome (transparent)
     --   4. 02-cam-outline.html  chamfered cam border frame (transparent)
@@ -256,7 +243,7 @@ local function build_game(base, socket_url)
 
     local game = make_game_capture("IVGO: Game Capture")
     if game then
-        place(scene, game, 88, 72, 1452, 824)
+        place(scene, game, 0, 0, 1920, 1080)
         obs.obs_source_release(game)
     end
 

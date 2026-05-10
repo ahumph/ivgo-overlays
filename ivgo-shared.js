@@ -67,7 +67,15 @@ const _bus = (function () {
 
     const params = new URLSearchParams(location.search);
     if (params.get('toasts') === '0') return;
-    const socketUrl = params.get('socket_url') || (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/overlay';
+    // Fallback chain: explicit ?socket_url= wins; otherwise build from
+    // location if the page has a real host (served from a dev server or
+    // OBS via http URL); otherwise default to the production Fly URL so
+    // testing the scene HTML directly from disk (file://, location.host
+    // is empty) doesn't construct the bogus "ws:///overlay" URL.
+    const socketUrl = params.get('socket_url')
+      || (location.host
+            ? (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/overlay'
+            : 'wss://ivgorchestra.fly.dev/overlay');
 
     try {
       const socket = new Phoenix.Socket(socketUrl, {});
