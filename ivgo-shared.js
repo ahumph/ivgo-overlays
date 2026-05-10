@@ -82,7 +82,7 @@ const _bus = (function () {
       socket.connect();
 
       _channel = socket.channel('overlay:events', {});
-      ['channel.follow', 'channel.subscribe', 'channel.subscription.gift', 'channel.cheer'].forEach(type => {
+      ['channel.follow', 'channel.subscribe', 'channel.subscription.gift', 'channel.cheer', 'channel.raid'].forEach(type => {
         _channel.on(type, payload => dispatch(type, payload));
       });
       _channel.join()
@@ -248,6 +248,14 @@ const _toast = (function () {
         line2: opts.message ? opts.message.slice(0, 60) : null,
         accent: T.amber,
       },
+      raid: {
+        label: 'RAID',
+        line1: (opts.from_broadcaster_user_name || opts.user_name || 'Someone')
+                 + ' raided with ' + (opts.viewers || 0)
+                 + ' viewer' + ((opts.viewers || 0) === 1 ? '' : 's'),
+        line2: null,
+        accent: T.live,
+      },
     };
 
     const item = map[opts.type];
@@ -257,43 +265,56 @@ const _toast = (function () {
   return { toast };
 })();
 
-// ── AlrightyBox ───────────────────────────────────────────────────────────
-// Top-left video easter egg. Plays media/alrighty-then.mp4 with audio
-// whenever channel.follow / channel.subscribe / channel.subscription.gift
-// fires. If events arrive while playing, drains them with one follow-up
-// play (pending-flag model — N events during one play → exactly 2 plays).
+// ── VideoEgg ──────────────────────────────────────────────────────────────
+// Multi-clip video easter egg in a top-left chamfered box. One shared DOM
+// container; clip src + dimensions + border come from the CLIPS table and
+// get applied per-trigger.
+//
+// Two-slot priority queue:
+//   - pendingHigh  (raid)        drains first
+//   - pendingNormal (alrighty)   drains second
+// trigger('raid') interrupts a current alrighty (preserving the alrighty
+// drain via pendingNormal so it resumes after the raid ends). Same-priority
+// triggers queue (drain semantic — N events during one play = exactly 1
+// drain of that priority).
 
-const _alrighty = (function () {
-  const SRC = '../media/alrighty-then.mp4';
+const _videoEgg = (function () {
+  const CLIPS = {
+    alrighty: { src: '../media/alrighty-then.mp4', w: 480, h: 270, border: T.rule2, priority: 1 },
+    raid:     { src: '../media/raid.mp4',          w: 480, h: 480, border: T.amber, priority: 2 },
+  };
+
   let containerEl = null;
   let videoEl = null;
-  let playing = false;
-  let pending = false;
+  let current = null;
+  let pendingHigh = false;
+  let pendingNormal = false;
+  let lastSrc = null;
+  // playGen guards against a stale .catch() from an interrupted play()
+  // resetting state after a new clip has already started.
+  let playGen = 0;
 
   function ensureMounted() {
     if (containerEl) return;
     containerEl = document.createElement('div');
     containerEl.className = 'ovl-chamfer-sm';
     // z-index:9 sits above HeaderBar (5) and Ticker (6) but below toasts
-    // (9999) so a toast popping during the easter-egg play overlays cleanly.
+    // (9999) so a toast popping during a clip overlays cleanly.
+    // width/height/border are clip-specific — set per play in applyClip().
     containerEl.style.cssText = [
       'position:fixed',
       'top:64px',
       'left:10px',
-      'width:480px',
-      'height:270px',
       'opacity:0',
       'pointer-events:none',
       'transition:opacity 250ms ease',
       'z-index:9',
-      'border:1px solid ' + T.rule2,
       'background:#000',
       'overflow:hidden',
       'box-shadow:0 4px 24px rgba(0,0,0,.5)',
     ].join(';');
 
     videoEl = document.createElement('video');
-    videoEl.src = SRC;
     videoEl.preload = 'auto';
     videoEl.playsInline = true;
     videoEl.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
@@ -304,67 +325,105 @@ const _alrighty = (function () {
     document.body.appendChild(containerEl);
   }
 
+  function applyClip(clip) {
+    containerEl.style.width = clip.w + 'px';
+    containerEl.style.height = clip.h + 'px';
+    containerEl.style.border = '1px solid ' + clip.border;
+    if (lastSrc !== clip.src) {
+      videoEl.src = clip.src;
+      lastSrc = clip.src;
+    }
+  }
+
   function hide() {
     if (containerEl) containerEl.style.opacity = '0';
   }
 
   function reset() {
-    playing = false;
-    pending = false;
+    current = null;
+    pendingHigh = false;
+    pendingNormal = false;
     hide();
   }
 
+  function play(clipName) {
+    const clip = CLIPS[clipName];
+    if (!clip) return;
+    ensureMounted();
+    current = clipName;
+    applyClip(clip);
+    containerEl.style.opacity = '1';
+
+    const myGen = ++playGen;
+    videoEl.currentTime = 0;
+    videoEl.play().catch(err => {
+      if (myGen !== playGen) return;   // stale: a newer play() superseded us
+      console.warn('[IVGO videoEgg] play() rejected:', err);
+      reset();
+    });
+  }
+
   function onEnded() {
-    if (pending) {
-      // Drain play: `playing` stays true through the loop — we never exited
-      // the playing state, just restarted the video. trigger() calls during
-      // this drain still see playing=true and queue another pending=true,
-      // giving the "one drain covers any number of queued events" semantic.
-      pending = false;
-      videoEl.currentTime = 0;
-      videoEl.play().catch(onPlayReject);
+    if (pendingHigh) {
+      pendingHigh = false;
+      play('raid');
       return;
     }
-    playing = false;
+    if (pendingNormal) {
+      pendingNormal = false;
+      play('alrighty');
+      return;
+    }
+    current = null;
     hide();
   }
 
   function onError(e) {
-    console.warn('[IVGO alrighty] video error', e);
+    console.warn('[IVGO videoEgg] video error', e);
     reset();
   }
 
-  function onPlayReject(err) {
-    console.warn('[IVGO alrighty] play() rejected:', err);
-    reset();
-  }
+  function trigger(clipName) {
+    const clip = CLIPS[clipName];
+    if (!clip) return;
 
-  function trigger() {
-    ensureMounted();
-    if (playing) {
-      pending = true;
+    if (current === null) {
+      play(clipName);
       return;
     }
-    playing = true;
-    containerEl.style.opacity = '1';
-    videoEl.currentTime = 0;
-    videoEl.play().catch(onPlayReject);
+
+    // Raid interrupts any non-raid play. The interrupted alrighty's drain is
+    // preserved via pendingNormal so it resumes after the raid ends.
+    if (clipName === 'raid' && current !== 'raid') {
+      if (current === 'alrighty') pendingNormal = true;
+      play('raid');
+      return;
+    }
+
+    // Same priority or lower: queue with last-wins drain semantic.
+    if (clip.priority >= 2) pendingHigh = true;
+    else pendingNormal = true;
   }
 
-  return { trigger };
+  return {
+    alrighty: function () { trigger('alrighty'); },
+    raid:     function () { trigger('raid'); },
+  };
 })();
 
-// Auto-wire Twitch events to toasts and alrighty video
+// Auto-wire Twitch events to toasts and video easter egg
 if (typeof document !== 'undefined') {
   document.addEventListener('DOMContentLoaded', function () {
     _bus.on('channel.follow', p => _toast.toast({ type: 'follow', ...p }));
     _bus.on('channel.subscribe', p => _toast.toast({ type: 'sub', ...p }));
     _bus.on('channel.subscription.gift', p => _toast.toast({ type: 'gift', ...p }));
     _bus.on('channel.cheer', p => _toast.toast({ type: 'cheer', ...p }));
+    _bus.on('channel.raid', p => _toast.toast({ type: 'raid', ...p }));
 
-    _bus.on('channel.follow',            () => _alrighty.trigger());
-    _bus.on('channel.subscribe',         () => _alrighty.trigger());
-    _bus.on('channel.subscription.gift', () => _alrighty.trigger());
+    _bus.on('channel.follow',            () => _videoEgg.alrighty());
+    _bus.on('channel.subscribe',         () => _videoEgg.alrighty());
+    _bus.on('channel.subscription.gift', () => _videoEgg.alrighty());
+    _bus.on('channel.raid',              () => _videoEgg.raid());
   });
 }
 
@@ -743,5 +802,6 @@ window.IVGO = {
   NowPlayingStrip, ChatPanel, GoalBar, Ticker, HeaderBar, Scene,
   bus: _bus,
   toast: _toast.toast,
-  alrighty: _alrighty.trigger,
+  alrighty: _videoEgg.alrighty,
+  raid:     _videoEgg.raid,
 };
