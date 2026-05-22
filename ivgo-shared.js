@@ -18,7 +18,7 @@ const TICKER = {
   brb:          ['BACK IN A MOMENT', ...EVENTS, 'IVGORCHESTRA.COM', 'REGISTERED CHARITY · BELFAST', 'INSTAGRAM · @ivgorchestra', 'BLUESKY · @ivgorchestra.com', 'YOUTUBE · @IrishVideoGameOrchestra', 'TIKTOK · @ivgorchestra'],
   twoCam:       ['QUESTIONS WELCOME IN CHAT', ...EVENTS.slice(0, 2), 'IVGORCHESTRA.COM'],
   ending:       ['THANKS FOR WATCHING', ...EVENTS, 'REGISTERED CHARITY · BELFAST', 'INSTAGRAM · @ivgorchestra', 'BLUESKY · @ivgorchestra.com', 'YOUTUBE · @IrishVideoGameOrchestra', 'TIKTOK · @ivgorchestra'],
-  arranging:    ['WORK ALONG · DROP A TASK IN CHAT', 'QUESTIONS WELCOME', ...EVENTS.slice(0, 2), 'IVGORCHESTRA.COM', 'REGISTERED CHARITY · BELFAST', 'INSTAGRAM · @ivgorchestra', 'BLUESKY · @ivgorchestra.com'],
+  arranging:    ['WORK ALONG WITH !TASK <TASK> IN CHAT', '!DONE TO TICK OFF A TASK', '!INFO FOR THE CURRENT PIECE', '!POMO TO SEE THE TIMER'],
 };
 
 const T = {
@@ -119,7 +119,15 @@ const _bus = (function () {
 
     const params = new URLSearchParams(location.search);
     if (params.get('toasts') === '0') return;
-    const socketUrl = params.get('socket_url') || (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/overlay';
+    // Fallback chain: explicit ?socket_url= wins; otherwise build from
+    // location if the page has a real host (served from a dev server or
+    // OBS via http URL); otherwise default to the production Fly URL so
+    // testing the scene HTML directly from disk (file://, location.host
+    // is empty) doesn't construct the bogus "ws:///overlay" URL.
+    const socketUrl = params.get('socket_url')
+      || (location.host
+            ? (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/overlay'
+            : 'wss://ivgorchestra.fly.dev/overlay');
 
     try {
       _socket = new Phoenix.Socket(socketUrl, {});
@@ -387,6 +395,9 @@ if (typeof document !== 'undefined' && !document.getElementById('ovl-styles')) {
     @keyframes ovl-rail   { from{translate:-64px 0;opacity:0}   to{translate:0 0;opacity:1} }
     @keyframes ovl-header { from{translate:0 -54px;opacity:0}   to{translate:0 0;opacity:1} }
     @keyframes ovl-tick   { from{translate:0 36px;opacity:0}    to{translate:0 0;opacity:1} }
+    /* Slow vertical pan for background-image media that's taller than the box. */
+    @keyframes ovl-gif-pan { 0%{background-position:center top} 100%{background-position:center bottom} }
+    .ovl-anim-gif-pan { animation: ovl-gif-pan 8s ease-in-out infinite alternate; }
     .ovl-anim-rail   { animation: ovl-rail   .55s cubic-bezier(.2,.8,.2,1) both; }
     .ovl-anim-header { animation: ovl-header .55s cubic-bezier(.2,.8,.2,1) .12s both; }
     .ovl-anim-rise   { animation: ovl-rise   .55s cubic-bezier(.2,.8,.2,1) .24s both; }
@@ -677,14 +688,49 @@ function HeaderBar() {
 // gates visibility on `info_shown` events and unmounts after 10s.
 function WorkbenchStrip({
   piece = "AERITH'S SUITE",
-  collection = 'FINAL FANTASY VII REBIRTH'
+  collection = 'FINAL FANTASY VII REBIRTH',
+  gif = null
 }) {
-  return React.createElement('div', {className:'ovl-chamfer ovl-toast-enter', style:{
+  // Pick MP4 over GIF when both are available — smaller, smoother, no frame-blending.
+  const mediaUrl = gif && (gif.mp4 || gif.gif || (typeof gif === 'string' ? gif : null));
+  const isVideo  = mediaUrl && /\.mp4($|\?)/i.test(mediaUrl);
+
+  return React.createElement('div', {className:'ovl-chamfer', style:{
     background:`linear-gradient(180deg, ${T.bg2} 0%, ${T.bg3} 100%)`,
     border:`1px solid ${T.rule2}`,
     boxShadow:`inset 0 1px 0 0 rgba(40,154,230,.18)`,
-    height: 96, display:'flex', alignItems:'stretch', padding:0
+    height: '100%', boxSizing: 'border-box',
+    display:'flex', alignItems:'stretch', padding:0,
+    overflow:'hidden', position:'relative'
   }},
+    // Right-half visual layer (animated). Sits behind the text cells via
+    // source order; left-edge mask fades into the FROM/piece text area.
+    mediaUrl && (isVideo
+      ? React.createElement('video', {
+          src: mediaUrl, autoPlay:true, muted:true, loop:true, playsInline:true,
+          style: {
+            position:'absolute', top:0, bottom:0, right:0, width:'62.5%',
+            objectFit:'cover', objectPosition:'center center',
+            WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 100%)',
+            maskImage:       'linear-gradient(to right, transparent 0%, black 100%)',
+            pointerEvents:'none', opacity:0.9
+          }
+        })
+      // Background-image div so we can animate `background-position` for a slow
+      // vertical pan — object-position is not reliably animatable in CEF.
+      : React.createElement('div', {
+          className: 'ovl-anim-gif-pan',
+          style: {
+            position:'absolute', top:0, bottom:0, right:0, width:'62.5%',
+            backgroundImage: `url("${mediaUrl}")`,
+            backgroundRepeat: 'no-repeat',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center center',
+            WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 100%)',
+            maskImage:       'linear-gradient(to right, transparent 0%, black 100%)',
+            pointerEvents:'none', opacity:0.9
+          }
+        })),
     React.createElement('div', {style:{
       flexShrink:0, padding:'0 22px', display:'flex', alignItems:'center', gap:10,
       background:'#06080a', borderRight:`1px solid ${T.rule2}`
@@ -701,10 +747,10 @@ function WorkbenchStrip({
         color:T.ink, lineHeight:1,
         whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'
       }}, piece),
-      React.createElement('div', {style:{display:'flex', alignItems:'center', gap:10}},
-        React.createElement('span', {style:{fontFamily:T.mono,fontSize:9,letterSpacing:'.34em',color:T.ink3,textTransform:'uppercase'}}, 'FROM'),
+      React.createElement('div', {style:{display:'flex', alignItems:'center', gap:14}},
+        React.createElement('span', {style:{fontFamily:T.mono,fontSize:13,letterSpacing:'.34em',color:T.ink3,textTransform:'uppercase'}}, 'FROM'),
         React.createElement('span', {style:{
-          fontFamily:T.mono, fontSize:12, letterSpacing:'.14em',
+          fontFamily:T.mono, fontSize:20, letterSpacing:'.14em',
           color:T.ink2, textTransform:'uppercase',
           whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'
         }}, collection)

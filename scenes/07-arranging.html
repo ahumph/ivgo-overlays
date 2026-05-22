@@ -38,6 +38,7 @@
   function SceneArranging() {
     const [piece, setPiece]           = React.useState(bootPiece);
     const [collection, setCollection] = React.useState(bootCollection);
+    const [gif, setGif]               = React.useState('../media/metal-gear.gif');  // TEMP: visual smoke-test
     const [tasks, setTasks]           = React.useState([]);
     const [pomo, setPomo] = React.useState({
       phase: 'idle',
@@ -63,6 +64,7 @@
         if (!s) return;
         if (s.piece != null)      setPiece(s.piece);
         if (s.collection != null) setCollection(s.collection);
+        if (s.gif !== undefined)  setGif(s.gif);
         if (Array.isArray(s.tasks)) setTasks(s.tasks);
         if (s.pomo) setPomo(prev => ({...prev, ...s.pomo}));
       });
@@ -71,6 +73,9 @@
         if (!payload) return;
         if (payload.piece != null)      setPiece(payload.piece);
         if (payload.collection != null) setCollection(payload.collection);
+        // gif: null clears the visual; undefined leaves it untouched (so a !piece
+        // that doesn't include a gif field doesn't accidentally wipe the override).
+        if (payload.gif !== undefined)  setGif(payload.gif);
       });
 
       ch.on('tasks_updated', (payload) => {
@@ -115,11 +120,15 @@
         e(TaskList, { tasks, cap: 6, width: 282 })
       ),
 
-      // Workbench strip — lower-third, only when !info is fired (or piece/from changes)
-      infoVisible && e('div', { style: {
-        position:'absolute', left:24, right:24, bottom:36+24
+      // Workbench strip — lower-third, only when !info is fired (or piece/from changes).
+      // Wrapper carries the entrance animation + explicit height so the clip-path'd
+      // WorkbenchStrip inside is a clean child (clip-path + animated `translate`
+      // can render as invisible in some CEF builds, so keep them separated).
+      // Right offset: 24 (chat margin) + 374 (chat rendered: content 340 + padding 16+16 + border 1+1) + 16 (gap)
+      infoVisible && e('div', { className: 'ovl-toast-enter', style: {
+        position:'absolute', left:24, right:24+374+16, bottom:36+10, height:192, zIndex:50
       }},
-        e(WorkbenchStrip, { piece, collection })
+        e(WorkbenchStrip, { piece, collection, gif })
       ),
 
       e(Ticker, { items: TICKER.arranging })

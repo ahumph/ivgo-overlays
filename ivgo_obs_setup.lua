@@ -368,9 +368,12 @@ local function build_arranging(base, piece, collection, sprints_total, focus_min
     local scene_src = get_scene_source("IVGO · 07 Arranging")
     local scene     = obs.obs_scene_from_source(scene_src)
 
-    -- Arranging streams use notation software, not games — display_capture on
-    -- both Windows and macOS.
-    local screen = make_capture("IVGO: Arranging Screen", "display_capture")
+    -- Arranging streams use notation software, not games — screen capture on
+    -- both platforms. The OBS source ID differs: monitor_capture on Windows,
+    -- display_capture on macOS. Using the wrong ID creates an unconfigured
+    -- source that shows "Display Device not connected or not available".
+    local screen_kind = is_windows() and "monitor_capture" or "display_capture"
+    local screen = make_capture("IVGO: Arranging Screen", screen_kind)
     if screen then
         place(scene, screen, 0, 0, 1920, 1080)
         obs.obs_source_release(screen)

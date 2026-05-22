@@ -22,10 +22,11 @@ local function build_arranging(base, piece, collection, sprints_total, focus_min
     local scene_src = get_scene_source("IVGO · 07 Arranging")
     local scene     = obs.obs_scene_from_source(scene_src)
 
-    -- macOS users get display_capture; Windows users get display_capture too
-    -- (we deliberately don't use game_capture here — arranging streams use
-    -- notation software, not games).
-    local screen = make_capture("IVGO: Arranging Screen", "display_capture")
+    -- Windows uses monitor_capture; macOS uses display_capture. (We deliberately
+    -- don't use game_capture here — arranging streams use notation software,
+    -- not games.)
+    local screen_kind = is_windows() and "monitor_capture" or "display_capture"
+    local screen = make_capture("IVGO: Arranging Screen", screen_kind)
     if screen then
         place(scene, screen, 0, 0, 1920, 1080)
         obs.obs_source_release(screen)
