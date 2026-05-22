@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>IVGO · 07 Arranging</title>
+<meta name="viewport" content="width=1920"/>
+<style>
+  html,body{margin:0;padding:0;background:transparent;width:1920px;height:1080px;overflow:hidden}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="../phoenix.min.js"></script>
+<script src="../ivgo-shared.js"></script>
+
+<script>
+(function () {
+  const {
+    Scene, HeaderBar, Ticker, TICKER,
+    WorkbenchStrip, SprintTimer, TaskList, bus
+  } = window.IVGO;
+  const e = React.createElement;
+
+  // URL params provide boot-time defaults. The Phoenix channel overrides
+  // everything at runtime via `state` / `*_updated` / `info_shown` events.
+  const q = new URLSearchParams(location.search);
+  const bootPiece      = q.get('piece')      || "AERITH'S SUITE";
+  const bootCollection = q.get('collection') || q.get('from') || 'FINAL FANTASY VII REBIRTH';
+  const bootFocusMins  = parseInt(q.get('focus_mins') || q.get('mins') || '25', 10);
+  const bootBreakMins  = parseInt(q.get('break_mins') || '5', 10);
+  const bootTotal      = parseInt(q.get('total') || '4', 10);
+
+  const INFO_VISIBLE_MS = 10_000;
+
+  function SceneArranging() {
+    const [piece, setPiece]           = React.useState(bootPiece);
+    const [collection, setCollection] = React.useState(bootCollection);
+    const [tasks, setTasks]           = React.useState([]);
+    const [pomo, setPomo] = React.useState({
+      phase: 'idle',
+      sprint: 1,
+      total: bootTotal,
+      focus_ms: bootFocusMins * 60_000,
+      break_ms: bootBreakMins * 60_000,
+      started_at: null
+    });
+    const [infoVisible, setInfoVisible] = React.useState(false);
+    const infoTimerRef = React.useRef(null);
+
+    const showInfo = React.useCallback(() => {
+      setInfoVisible(true);
+      if (infoTimerRef.current) clearTimeout(infoTimerRef.current);
+      infoTimerRef.current = setTimeout(() => setInfoVisible(false), INFO_VISIBLE_MS);
+    }, []);
+
+    React.useEffect(() => {
+      const ch = bus.joinChannel('overlay:arranging');
+
+      ch.on('state', (s) => {
+        if (!s) return;
+        if (s.piece != null)      setPiece(s.piece);
+        if (s.collection != null) setCollection(s.collection);
+        if (Array.isArray(s.tasks)) setTasks(s.tasks);
+        if (s.pomo) setPomo(prev => ({...prev, ...s.pomo}));
+      });
+
+      ch.on('workbench_updated', (payload) => {
+        if (!payload) return;
+        if (payload.piece != null)      setPiece(payload.piece);
+        if (payload.collection != null) setCollection(payload.collection);
+      });
+
+      ch.on('tasks_updated', (payload) => {
+        if (payload && Array.isArray(payload.tasks)) setTasks(payload.tasks);
+      });
+
+      ch.on('pomo_updated', (payload) => {
+        if (payload && payload.pomo) setPomo(prev => ({...prev, ...payload.pomo}));
+      });
+
+      ch.on('info_shown', () => showInfo());
+
+      return () => {
+        if (infoTimerRef.current) clearTimeout(infoTimerRef.current);
+      };
+    }, [showInfo]);
+
+    // Pomo state → SprintTimer prop shape (the component takes camelCase).
+    const phase = (pomo.phase || 'idle').toUpperCase();
+    const durationMs = phase === 'BREAK' ? pomo.break_ms : pomo.focus_ms;
+
+    return e(Scene, { label: '07 Arranging', transparent: true },
+      e(HeaderBar),
+
+      // Sprint timer — top-right, just under header
+      e('div', { className: 'ovl-anim-rise', style: {
+        position:'absolute', right:24, top:54+18
+      }},
+        e(SprintTimer, {
+          phase,
+          sprint: pomo.sprint,
+          total:  pomo.total,
+          durationMs,
+          startedAt: pomo.started_at
+        })
+      ),
+
+      // Tasks — under cam slot (cam is at 24,72,282x158, so list anchors at top: 240)
+      e('div', { className: 'ovl-anim-rail', style: {
+        position:'absolute', left:24, top:240, width:282
+      }},
+        e(TaskList, { tasks, cap: 6, width: 282 })
+      ),
+
+      // Workbench strip — lower-third, only when !info is fired (or piece/from changes)
+      infoVisible && e('div', { style: {
+        position:'absolute', left:24, right:24, bottom:36+24
+      }},
+        e(WorkbenchStrip, { piece, collection })
+      ),
+
+      e(Ticker, { items: TICKER.arranging })
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(e(SceneArranging));
+})();
+</script>
+</body>
+</html>

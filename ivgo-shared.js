@@ -18,6 +18,7 @@ const TICKER = {
   brb:          ['BACK IN A MOMENT', ...EVENTS, 'IVGORCHESTRA.COM', 'REGISTERED CHARITY · BELFAST', 'INSTAGRAM · @ivgorchestra', 'BLUESKY · @ivgorchestra.com', 'YOUTUBE · @IrishVideoGameOrchestra', 'TIKTOK · @ivgorchestra'],
   twoCam:       ['QUESTIONS WELCOME IN CHAT', ...EVENTS.slice(0, 2), 'IVGORCHESTRA.COM'],
   ending:       ['THANKS FOR WATCHING', ...EVENTS, 'REGISTERED CHARITY · BELFAST', 'INSTAGRAM · @ivgorchestra', 'BLUESKY · @ivgorchestra.com', 'YOUTUBE · @IrishVideoGameOrchestra', 'TIKTOK · @ivgorchestra'],
+  arranging:    ['WORK ALONG · DROP A TASK IN CHAT', 'QUESTIONS WELCOME', ...EVENTS.slice(0, 2), 'IVGORCHESTRA.COM', 'REGISTERED CHARITY · BELFAST', 'INSTAGRAM · @ivgorchestra', 'BLUESKY · @ivgorchestra.com'],
 };
 
 const T = {
@@ -31,6 +32,7 @@ const T = {
   rule2:     'rgba(255,255,255,0.16)',
   live:      '#ff5a3c',
   amber:     '#f5a524',
+  done:      '#22c55e',
   accent:     '#289ae6',
   accentDeep: '#1a6fb0',
   accentGlow: 'rgba(40,154,230,0.55)',
@@ -50,6 +52,9 @@ const T = {
 const _bus = (function () {
   const listeners = {};
   let _channel = null;
+  let _socket = null;
+  const _extraChannels = {};   // topic → { channel, listeners: {event: [fn]} }
+  const _pendingJoins = [];    // joinChannel() calls made before socket connect
 
   function on(event, fn) {
     listeners[event] = listeners[event] || [];
@@ -62,34 +67,76 @@ const _bus = (function () {
     });
   }
 
+  // Lazy-join an additional Phoenix Channel topic. Returns an object exposing
+  //   .on(event, fn)  — register listener for a server-pushed event
+  // The same handle is returned for repeat calls to the same topic so multiple
+  // listeners can be attached.
+  function joinChannel(topic) {
+    if (_extraChannels[topic]) return _extraChannels[topic].handle;
+
+    const entry = { channel: null, listeners: {} };
+    const handle = {
+      on(event, fn) {
+        entry.listeners[event] = entry.listeners[event] || [];
+        entry.listeners[event].push(fn);
+        if (entry.channel) entry.channel.on(event, fn);
+        return handle;
+      }
+    };
+    entry.handle = handle;
+    _extraChannels[topic] = entry;
+
+    if (_socket) {
+      _wireExtraChannel(topic, entry);
+    } else {
+      _pendingJoins.push(topic);
+    }
+    return handle;
+  }
+
+  function _wireExtraChannel(topic, entry) {
+    try {
+      entry.channel = _socket.channel(topic, {});
+      Object.keys(entry.listeners).forEach(event => {
+        entry.listeners[event].forEach(fn => entry.channel.on(event, fn));
+      });
+      entry.channel.join()
+        .receive('ok', resp => {
+          console.log('[IVGO bus] joined ' + topic);
+          // Surface initial state push via a synthetic 'state' event.
+          if (resp && resp.state) (entry.listeners['state'] || []).forEach(fn => {
+            try { fn(resp.state); } catch (e) { console.error('[IVGO bus]', e); }
+          });
+        })
+        .receive('error', e => console.warn('[IVGO bus] join error on ' + topic, e));
+    } catch (e) {
+      console.warn('[IVGO bus] joinChannel failed for ' + topic, e);
+    }
+  }
+
   function connect() {
     if (typeof Phoenix === 'undefined') return;
 
     const params = new URLSearchParams(location.search);
     if (params.get('toasts') === '0') return;
-    // Fallback chain: explicit ?socket_url= wins; otherwise build from
-    // location if the page has a real host (served from a dev server or
-    // OBS via http URL); otherwise default to the production Fly URL so
-    // testing the scene HTML directly from disk (file://, location.host
-    // is empty) doesn't construct the bogus "ws:///overlay" URL.
-    const socketUrl = params.get('socket_url')
-      || (location.host
-            ? (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/overlay'
-            : 'wss://ivgorchestra.fly.dev/overlay');
+    const socketUrl = params.get('socket_url') || (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/overlay';
 
     try {
-      const socket = new Phoenix.Socket(socketUrl, {});
-      socket.connect();
+      _socket = new Phoenix.Socket(socketUrl, {});
+      _socket.connect();
 
-      _channel = socket.channel('overlay:events', {});
-      ['channel.follow', 'channel.subscribe', 'channel.subscription.gift', 'channel.cheer', 'channel.raid'].forEach(type => {
+      _channel = _socket.channel('overlay:events', {});
+      ['channel.follow', 'channel.subscribe', 'channel.subscription.gift', 'channel.cheer'].forEach(type => {
         _channel.on(type, payload => dispatch(type, payload));
       });
       _channel.join()
         .receive('ok', () => console.log('[IVGO bus] joined overlay:events'))
         .receive('error', e => console.warn('[IVGO bus] join error', e));
 
-      socket.onError(() => console.warn('[IVGO bus] socket error'));
+      _socket.onError(() => console.warn('[IVGO bus] socket error'));
+
+      // Flush any joinChannel() calls that landed before connect.
+      _pendingJoins.splice(0).forEach(topic => _wireExtraChannel(topic, _extraChannels[topic]));
     } catch (e) {
       console.warn('[IVGO bus] connect failed', e);
     }
@@ -99,7 +146,7 @@ const _bus = (function () {
     document.addEventListener('DOMContentLoaded', connect);
   }
 
-  return { on, dispatch };
+  return { on, dispatch, joinChannel };
 })();
 
 // ── ToastQueue ────────────────────────────────────────────────────────────
@@ -248,14 +295,6 @@ const _toast = (function () {
         line2: opts.message ? opts.message.slice(0, 60) : null,
         accent: T.amber,
       },
-      raid: {
-        label: 'RAID',
-        line1: (opts.from_broadcaster_user_name || opts.user_name || 'Someone')
-                 + ' raided with ' + (opts.viewers || 0)
-                 + ' viewer' + ((opts.viewers || 0) === 1 ? '' : 's'),
-        line2: null,
-        accent: T.live,
-      },
     };
 
     const item = map[opts.type];
@@ -265,165 +304,13 @@ const _toast = (function () {
   return { toast };
 })();
 
-// ── VideoEgg ──────────────────────────────────────────────────────────────
-// Multi-clip video easter egg in a top-left chamfered box. One shared DOM
-// container; clip src + dimensions + border come from the CLIPS table and
-// get applied per-trigger.
-//
-// Two-slot priority queue:
-//   - pendingHigh  (raid)        drains first
-//   - pendingNormal (alrighty)   drains second
-// trigger('raid') interrupts a current alrighty (preserving the alrighty
-// drain via pendingNormal so it resumes after the raid ends). Same-priority
-// triggers queue (drain semantic — N events during one play = exactly 1
-// drain of that priority).
-
-const _videoEgg = (function () {
-  const CLIPS = {
-    alrighty: { src: '../media/alrighty-then.mp4', w: 480, h: 270, border: T.rule2, priority: 1 },
-    raid:     { src: '../media/raid.mp4',          w: 480, h: 480, border: T.amber, priority: 2 },
-  };
-
-  let containerEl = null;
-  let videoEl = null;
-  let current = null;
-  let pendingHigh = false;
-  let pendingNormal = false;
-  let lastSrc = null;
-  // playGen guards against a stale .catch() from an interrupted play()
-  // resetting state after a new clip has already started.
-  let playGen = 0;
-
-  function ensureMounted() {
-    if (containerEl) return;
-    containerEl = document.createElement('div');
-    containerEl.className = 'ovl-chamfer-sm';
-    // z-index:9 sits above HeaderBar (5) and Ticker (6) but below toasts
-    // (9999) so a toast popping during a clip overlays cleanly.
-    // width/height/border are clip-specific — set per play in applyClip().
-    containerEl.style.cssText = [
-      'position:fixed',
-      'top:64px',
-      'left:10px',
-      'opacity:0',
-      'pointer-events:none',
-      'transition:opacity 250ms ease',
-      'z-index:9',
-      'background:#000',
-      'overflow:hidden',
-      'box-shadow:0 4px 24px rgba(0,0,0,.5)',
-    ].join(';');
-
-    videoEl = document.createElement('video');
-    videoEl.preload = 'auto';
-    videoEl.playsInline = true;
-    videoEl.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
-    videoEl.addEventListener('ended', onEnded);
-    videoEl.addEventListener('error', onError);
-
-    containerEl.appendChild(videoEl);
-    document.body.appendChild(containerEl);
-  }
-
-  function applyClip(clip) {
-    containerEl.style.width = clip.w + 'px';
-    containerEl.style.height = clip.h + 'px';
-    containerEl.style.border = '1px solid ' + clip.border;
-    if (lastSrc !== clip.src) {
-      videoEl.src = clip.src;
-      lastSrc = clip.src;
-    }
-  }
-
-  function hide() {
-    if (containerEl) containerEl.style.opacity = '0';
-  }
-
-  function reset() {
-    current = null;
-    pendingHigh = false;
-    pendingNormal = false;
-    hide();
-  }
-
-  function play(clipName) {
-    const clip = CLIPS[clipName];
-    if (!clip) return;
-    ensureMounted();
-    current = clipName;
-    applyClip(clip);
-    containerEl.style.opacity = '1';
-
-    const myGen = ++playGen;
-    videoEl.currentTime = 0;
-    videoEl.play().catch(err => {
-      if (myGen !== playGen) return;   // stale: a newer play() superseded us
-      console.warn('[IVGO videoEgg] play() rejected:', err);
-      reset();
-    });
-  }
-
-  function onEnded() {
-    if (pendingHigh) {
-      pendingHigh = false;
-      play('raid');
-      return;
-    }
-    if (pendingNormal) {
-      pendingNormal = false;
-      play('alrighty');
-      return;
-    }
-    current = null;
-    hide();
-  }
-
-  function onError(e) {
-    console.warn('[IVGO videoEgg] video error', e);
-    reset();
-  }
-
-  function trigger(clipName) {
-    const clip = CLIPS[clipName];
-    if (!clip) return;
-
-    if (current === null) {
-      play(clipName);
-      return;
-    }
-
-    // Raid interrupts any non-raid play. The interrupted alrighty's drain is
-    // preserved via pendingNormal so it resumes after the raid ends.
-    if (clipName === 'raid' && current !== 'raid') {
-      if (current === 'alrighty') pendingNormal = true;
-      play('raid');
-      return;
-    }
-
-    // Same priority or lower: queue with last-wins drain semantic.
-    if (clip.priority >= 2) pendingHigh = true;
-    else pendingNormal = true;
-  }
-
-  return {
-    alrighty: function () { trigger('alrighty'); },
-    raid:     function () { trigger('raid'); },
-  };
-})();
-
-// Auto-wire Twitch events to toasts and video easter egg
+// Auto-wire Twitch events to toasts
 if (typeof document !== 'undefined') {
   document.addEventListener('DOMContentLoaded', function () {
     _bus.on('channel.follow', p => _toast.toast({ type: 'follow', ...p }));
     _bus.on('channel.subscribe', p => _toast.toast({ type: 'sub', ...p }));
     _bus.on('channel.subscription.gift', p => _toast.toast({ type: 'gift', ...p }));
     _bus.on('channel.cheer', p => _toast.toast({ type: 'cheer', ...p }));
-    _bus.on('channel.raid', p => _toast.toast({ type: 'raid', ...p }));
-
-    _bus.on('channel.follow',            () => _videoEgg.alrighty());
-    _bus.on('channel.subscribe',         () => _videoEgg.alrighty());
-    _bus.on('channel.subscription.gift', () => _videoEgg.alrighty());
-    _bus.on('channel.raid',              () => _videoEgg.raid());
   });
 }
 
@@ -781,6 +668,222 @@ function HeaderBar() {
   );
 }
 
+// ── Arranging-scene components ────────────────────────────────────────────
+// Sibling-style helpers for coworking/arranging streams. Live in shared so
+// they can be reused; tone is calmer and more information-dense than the
+// broadcast components above.
+
+// Lower-third for arranging: two-cell PIECE / FROM card. Ephemeral — the scene
+// gates visibility on `info_shown` events and unmounts after 10s.
+function WorkbenchStrip({
+  piece = "AERITH'S SUITE",
+  collection = 'FINAL FANTASY VII REBIRTH'
+}) {
+  return React.createElement('div', {className:'ovl-chamfer ovl-toast-enter', style:{
+    background:`linear-gradient(180deg, ${T.bg2} 0%, ${T.bg3} 100%)`,
+    border:`1px solid ${T.rule2}`,
+    boxShadow:`inset 0 1px 0 0 rgba(40,154,230,.18)`,
+    height: 96, display:'flex', alignItems:'stretch', padding:0
+  }},
+    React.createElement('div', {style:{
+      flexShrink:0, padding:'0 22px', display:'flex', alignItems:'center', gap:10,
+      background:'#06080a', borderRight:`1px solid ${T.rule2}`
+    }},
+      React.createElement('div', {style:{width:8, height:8, background:T.accent, boxShadow:`0 0 10px ${T.accentGlow}`}}),
+      React.createElement('div', {style:{fontFamily:T.mono,fontSize:10,letterSpacing:'.36em',color:T.ink2,textTransform:'uppercase'}}, 'ON THE DESK')
+    ),
+    React.createElement('div', {style:{
+      flex:1, display:'flex', flexDirection:'column', justifyContent:'center', gap:8,
+      padding:'0 28px', minWidth:0
+    }},
+      React.createElement('div', {style:{
+        fontFamily:T.display, fontSize:34, fontWeight:800, letterSpacing:'.02em',
+        color:T.ink, lineHeight:1,
+        whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'
+      }}, piece),
+      React.createElement('div', {style:{display:'flex', alignItems:'center', gap:10}},
+        React.createElement('span', {style:{fontFamily:T.mono,fontSize:9,letterSpacing:'.34em',color:T.ink3,textTransform:'uppercase'}}, 'FROM'),
+        React.createElement('span', {style:{
+          fontFamily:T.mono, fontSize:12, letterSpacing:'.14em',
+          color:T.ink2, textTransform:'uppercase',
+          whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'
+        }}, collection)
+      )
+    )
+  );
+}
+
+// Pomodoro timer: phase chip + countdown + sprint dots.
+// phase: 'FOCUS' | 'BREAK' | 'IDLE'  (string or lowercase — case-insensitive)
+// startedAt: ISO-8601 string (or ms epoch). If null, the timer is idle/paused
+// and shows the full configured durationMs in a dim colour.
+function SprintTimer({
+  phase = 'IDLE', sprint = 1, total = 4, durationMs, startedAt,
+}) {
+  const phaseU = String(phase || 'IDLE').toUpperCase();
+  const defaults = { FOCUS: 25*60*1000, BREAK: 5*60*1000, IDLE: 25*60*1000 };
+  const ms = durationMs != null ? durationMs : defaults[phaseU] || defaults.FOCUS;
+  const startMs = startedAt
+    ? (typeof startedAt === 'number' ? startedAt : Date.parse(startedAt))
+    : null;
+  const idle = phaseU === 'IDLE' || startMs == null;
+
+  const computeRemaining = React.useCallback(() => {
+    if (idle) return ms;
+    return Math.max(0, ms - (Date.now() - startMs));
+  }, [ms, startMs, idle]);
+
+  const [remaining, setRemaining] = React.useState(computeRemaining);
+  React.useEffect(() => {
+    setRemaining(computeRemaining());
+    if (idle) return;
+    const id = setInterval(() => setRemaining(computeRemaining()), 250);
+    return () => clearInterval(id);
+  }, [computeRemaining, idle]);
+
+  const mm = String(Math.floor(remaining / 60000)).padStart(2, '0');
+  const ss = String(Math.floor((remaining % 60000) / 1000)).padStart(2, '0');
+
+  const accent = phaseU === 'BREAK' ? T.amber : (idle ? T.ink3 : T.accent);
+  const accentGlow = phaseU === 'BREAK' ? 'rgba(245,165,36,.55)' : (idle ? 'transparent' : T.accentGlow);
+  const phaseLabel = idle ? 'POMO IDLE' : (phaseU === 'BREAK' ? 'SHORT BREAK' : 'FOCUS SPRINT');
+  const numberColor = idle ? T.ink3 : T.ink;
+
+  const dots = [];
+  for (let i = 1; i <= total; i++) {
+    const filled = i < sprint;
+    const current = i === sprint && !idle;
+    dots.push(React.createElement('div', {key:i, style:{
+      width: current ? 10 : 8, height: current ? 10 : 8,
+      borderRadius:'50%',
+      background: filled ? accent : (current ? accent : 'transparent'),
+      border: `1px solid ${filled ? accent : (current ? accent : T.rule2)}`,
+      boxShadow: current ? `0 0 8px ${accentGlow}` : 'none',
+      opacity: filled ? 0.55 : 1,
+    }}));
+  }
+
+  return React.createElement('div', {className:'ovl-chamfer-sm', style:{
+    background:'rgba(6,8,10,.78)', backdropFilter:'blur(8px)',
+    border:`1px solid ${T.rule2}`, padding:'12px 16px',
+    display:'flex', alignItems:'center', gap:18, minWidth: 320
+  }},
+    React.createElement('div', {style:{display:'flex',flexDirection:'column',gap:4,flex:1}},
+      React.createElement('div', {style:{display:'flex',alignItems:'center',gap:8}},
+        React.createElement('div', {style:{width:6, height:6, background:accent, boxShadow:idle ? 'none' : `0 0 8px ${accentGlow}`}}),
+        React.createElement('div', {style:{fontFamily:T.mono,fontSize:10,letterSpacing:'.32em',color:accent}}, phaseLabel)
+      ),
+      React.createElement('div', {style:{display:'flex',alignItems:'baseline',gap:4,fontFamily:T.display,fontWeight:800,color:numberColor}},
+        React.createElement('span', {style:{fontSize:38,lineHeight:1,letterSpacing:'.02em'}}, mm),
+        React.createElement('span', {
+          style:{fontSize:28,color:T.ink3,lineHeight:1},
+          className: idle ? '' : 'ovl-blink'
+        }, ':'),
+        React.createElement('span', {style:{fontSize:38,lineHeight:1,letterSpacing:'.02em'}}, ss)
+      )
+    ),
+    React.createElement('div', {style:{width:1, height:48, background:T.rule2}}),
+    React.createElement('div', {style:{display:'flex',flexDirection:'column',gap:6,alignItems:'flex-end'}},
+      React.createElement('div', {style:{fontFamily:T.mono,fontSize:9,letterSpacing:'.32em',color:T.ink3}}, `SPRINT ${sprint} / ${total}`),
+      React.createElement('div', {style:{display:'flex',gap:6}}, ...dots)
+    )
+  );
+}
+
+// Vertical list of viewer tasks. Sits under the cam in the arranging scene.
+// tasks: [{id, user_login, user_name, text, added_at, done_at}]
+// Shows up to `cap` rows; sort = open (oldest→newest), then done (newest→oldest).
+// Done tasks stay visible (green tick) until shouldered out by new entries.
+function TaskList({tasks = [], cap = 6, width = 282}) {
+  const open = [];
+  const done = [];
+  tasks.forEach(t => (t.done_at ? done : open).push(t));
+  open.sort((a, b) => (a.added_at || '').localeCompare(b.added_at || ''));
+  done.sort((a, b) => (b.done_at || '').localeCompare(a.done_at || ''));
+  const visible = [...open, ...done].slice(0, cap);
+
+  const checkbox = (isDone) => React.createElement('div', {style:{
+    width:12, height:12, flexShrink:0,
+    border:`1px solid ${isDone ? T.done : T.rule2}`,
+    background: isDone ? T.done : 'transparent',
+    display:'flex', alignItems:'center', justifyContent:'center',
+    transition:'background 200ms ease, border-color 200ms ease'
+  }},
+    isDone && React.createElement('svg', {width:10, height:10, viewBox:'0 0 10 10', 'aria-hidden':'true'},
+      React.createElement('path', {
+        d:'M1.5 5.2 L4 7.5 L8.5 2.5',
+        stroke:'#fff', strokeWidth:1.6, fill:'none', strokeLinecap:'round', strokeLinejoin:'round'
+      })
+    )
+  );
+
+  return React.createElement('div', {className:'ovl-chamfer-sm', style:{
+    width, background:'rgba(6,8,10,.78)', backdropFilter:'blur(8px)',
+    border:`1px solid ${T.rule2}`,
+    display:'flex', flexDirection:'column'
+  }},
+    React.createElement('div', {style:{
+      padding:'8px 12px', borderBottom:`1px solid ${T.rule}`,
+      display:'flex', alignItems:'center', justifyContent:'space-between'
+    }},
+      React.createElement('div', {style:{fontFamily:T.mono,fontSize:10,letterSpacing:'.32em',color:T.accent}}, 'TASKS'),
+      React.createElement('div', {style:{fontFamily:T.mono,fontSize:9,letterSpacing:'.24em',color:T.ink3}},
+        `${open.length} OPEN`
+      )
+    ),
+    React.createElement('div', {style:{display:'flex', flexDirection:'column'}},
+      visible.length === 0
+        ? React.createElement('div', {style:{
+            padding:'12px', fontFamily:T.mono, fontSize:10, letterSpacing:'.18em',
+            color:T.ink3, textTransform:'uppercase'
+          }}, 'DROP A TASK · !task <thing>')
+        : visible.map(t => React.createElement('div', {key:t.id, style:{
+            padding:'7px 12px', display:'flex', alignItems:'center', gap:8,
+            borderTop:`1px solid ${T.rule}`,
+            opacity: t.done_at ? 0.78 : 1,
+            transition:'opacity 200ms ease'
+          }},
+            checkbox(!!t.done_at),
+            React.createElement('span', {style:{
+              fontFamily:T.mono, fontSize:10, letterSpacing:'.06em',
+              color: _chatColor(t.user_name || t.user_login || 'viewer'),
+              flexShrink:0, fontWeight:600,
+              maxWidth:80, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'
+            }}, t.user_name || t.user_login || 'viewer'),
+            React.createElement('span', {style:{
+              fontFamily:T.sans, fontSize:12, color:T.ink, lineHeight:1.25,
+              overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', minWidth:0, flex:1
+            }}, t.text)
+          ))
+    )
+  );
+}
+
+// Thin status strip — current micro-task. Sits just above the ticker.
+function TaskBar({task = 'VOICING TROMBONES BARS 32–48', cta = 'WORK ALONG · #COWORK'}) {
+  return React.createElement('div', {style:{
+    position:'absolute', left:0, right:0, bottom:36,
+    height:32, display:'flex', alignItems:'stretch',
+    background:'rgba(6,8,10,.78)', backdropFilter:'blur(8px)',
+    borderTop:`1px solid ${T.rule}`,
+    fontFamily:T.mono, fontSize:11, letterSpacing:'.18em',
+    color:T.ink2, textTransform:'uppercase', zIndex:5
+  }},
+    React.createElement('div', {style:{
+      flexShrink:0, padding:'0 18px', display:'flex', alignItems:'center', gap:8,
+      borderRight:`1px solid ${T.rule2}`, color:T.accent, letterSpacing:'.32em', fontSize:10
+    }},
+      React.createElement('span', {style:{width:6,height:6,background:T.accent,boxShadow:`0 0 6px ${T.accentGlow}`}}),
+      'TASK'
+    ),
+    React.createElement('div', {style:{flex:1, padding:'0 18px', display:'flex', alignItems:'center', color:T.ink, overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis'}}, task),
+    React.createElement('div', {style:{
+      flexShrink:0, padding:'0 18px', display:'flex', alignItems:'center',
+      borderLeft:`1px solid ${T.rule2}`, color:T.ink2, letterSpacing:'.28em', fontSize:10
+    }}, cta)
+  );
+}
+
 // transparent: when true, the outer Scene background is removed so OBS can
 // composite gameplay/cam capture under the overlay. Use for game / two-cam / cam scenes.
 function Scene({children, label, transparent=false}) {
@@ -800,8 +903,7 @@ window.IVGO = {
   Wordmark, WeeMan, LiveBadge, Chip, MetaLine, AudioBars,
   UtilityRail, CornerTrim, MediaPlaceholder,
   NowPlayingStrip, ChatPanel, GoalBar, Ticker, HeaderBar, Scene,
+  WorkbenchStrip, SprintTimer, TaskBar, TaskList,
   bus: _bus,
   toast: _toast.toast,
-  alrighty: _videoEgg.alrighty,
-  raid:     _videoEgg.raid,
 };
