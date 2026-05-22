@@ -354,6 +354,61 @@ local function build_ending(base, socket_url)
     obs.obs_source_release(scene_src)
 end
 
+local function build_arranging(base, piece, collection, sprints_total, focus_mins, break_mins, socket_url)
+    -- Layer order bottom → top:
+    --   1. Screen Capture (display)  x:0,  y:0,    w:1920, h:1080  (notation / DAW)
+    --   2. Host Camera               x:24, y:72,   w:282,  h:158   (small PiP top-left)
+    --   3. 07-arranging.html         chrome: header, task list, pomo timer, ticker.
+    --                                 The "ON THE DESK" workbench strip is hidden by
+    --                                 default and only surfaces for 10s when chat
+    --                                 fires !info (or a mod changes !piece / !from).
+    --   4. 07-cam-outline.html       cam border frame + "AT THE DESK" badge
+    --   5. 07-chat.html              chat panel (right column)
+
+    local scene_src = get_scene_source("IVGO · 07 Arranging")
+    local scene     = obs.obs_scene_from_source(scene_src)
+
+    -- Arranging streams use notation software, not games — display_capture on
+    -- both Windows and macOS.
+    local screen = make_capture("IVGO: Arranging Screen", "display_capture")
+    if screen then
+        place(scene, screen, 0, 0, 1920, 1080)
+        obs.obs_source_release(screen)
+    end
+
+    local cam = make_capture("IVGO: Host Camera", cam_type())
+    if cam then
+        place(scene, cam, 24, 72, 282, 158)
+        obs.obs_source_release(cam)
+    end
+
+    local params = "piece="       .. urlencode(piece)      ..
+                   "&collection=" .. urlencode(collection) ..
+                   "&total="      .. urlencode(tostring(sprints_total)) ..
+                   "&focus_mins=" .. urlencode(tostring(focus_mins)) ..
+                   "&break_mins=" .. urlencode(tostring(break_mins))
+
+    local overlay = make_browser("IVGO: Arranging Overlay", append_socket_url(base .. "/07-arranging.html?" .. params, socket_url))
+    if overlay then
+        place(scene, overlay, 0, 0, 1920, 1080)
+        obs.obs_source_release(overlay)
+    end
+
+    local cam_frame = make_browser("IVGO: Arranging Cam Outline", append_socket_url(base .. "/07-cam-outline.html?toasts=0", socket_url))
+    if cam_frame then
+        place(scene, cam_frame, 0, 0, 1920, 1080)
+        obs.obs_source_release(cam_frame)
+    end
+
+    local chat = make_browser("IVGO: Arranging Chat", append_socket_url(base .. "/07-chat.html?toasts=0", socket_url))
+    if chat then
+        place(scene, chat, 0, 0, 1920, 1080)
+        obs.obs_source_release(chat)
+    end
+
+    obs.obs_source_release(scene_src)
+end
+
 local function build_all()
     local base       = scenes_base_url()
     local host       = obs.obs_data_get_string(settings_ref, "host_name")
@@ -364,6 +419,12 @@ local function build_all()
     local countdown  = obs.obs_data_get_string(settings_ref, "countdown")
     local socket_url = obs.obs_data_get_string(settings_ref, "socket_url")
 
+    local arr_piece         = obs.obs_data_get_string(settings_ref, "arr_piece")
+    local arr_collection    = obs.obs_data_get_string(settings_ref, "arr_collection")
+    local arr_sprints_total = obs.obs_data_get_int   (settings_ref, "arr_sprints_total")
+    local arr_focus_mins    = obs.obs_data_get_int   (settings_ref, "arr_focus_mins")
+    local arr_break_mins    = obs.obs_data_get_int   (settings_ref, "arr_break_mins")
+
     print("[IVGO] Building scenes from: " .. base)
 
     build_starting_soon(base, countdown, socket_url)
@@ -372,19 +433,21 @@ local function build_all()
     build_brb(base, socket_url)
     build_two_cam(base, host, host_role, guest, g_role, topic, socket_url)
     build_ending(base, socket_url)
+    build_arranging(base, arr_piece, arr_collection, arr_sprints_total, arr_focus_mins, arr_break_mins, socket_url)
 
-    print("[IVGO] Done — 6 scenes created / refreshed.")
+    print("[IVGO] Done — 7 scenes created / refreshed.")
 end
 
 -- ── OBS script hooks ──────────────────────────────────────────────────────────
 
 function script_description()
     return [[<b>IVGO Overlay Installer</b><br><br>
-Builds all six IVGO scenes in OBS. Fill in the fields below then click
+Builds all seven IVGO scenes in OBS. Fill in the fields below then click
 <b>Create / Refresh Scenes</b>.<br><br>
 Safe to re-run: updates existing scenes rather than duplicating them.<br><br>
 After the first run, right-click the placeholder capture sources in the
-Game, Camera, and Two-Cam scenes to point them at your webcam and game window.]]
+Game, Camera, Two-Cam, and Arranging scenes to point them at your webcam,
+game window, and notation-software display.]]
 end
 
 function script_load(settings)
@@ -399,6 +462,12 @@ function script_defaults(settings)
     obs.obs_data_set_default_string(settings, "topic",      "WHY VIDEO GAME MUSIC DESERVES A FULL ORCHESTRA")
     obs.obs_data_set_default_string(settings, "countdown",  "2026-06-06T19:00:00Z")
     obs.obs_data_set_default_string(settings, "socket_url", "wss://ivgorchestra.fly.dev/overlay")
+
+    obs.obs_data_set_default_string(settings, "arr_piece",         "AERITH'S SUITE")
+    obs.obs_data_set_default_string(settings, "arr_collection",    "FINAL FANTASY VII REBIRTH")
+    obs.obs_data_set_default_int   (settings, "arr_sprints_total",  4)
+    obs.obs_data_set_default_int   (settings, "arr_focus_mins",    25)
+    obs.obs_data_set_default_int   (settings, "arr_break_mins",     5)
 end
 
 function script_properties()
@@ -431,6 +500,15 @@ function script_properties()
     obs.obs_properties_add_text(props, "socket_url", "Socket URL", obs.OBS_TEXT_DEFAULT)
     obs.obs_properties_add_text(props, "_socket_hint",
         "Local: ws://localhost:4000/overlay   Live: wss://ivgorchestra.fly.dev/overlay",
+        obs.OBS_TEXT_INFO)
+
+    obs.obs_properties_add_text(props, "arr_piece",         "Arranging: piece",         obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_text(props, "arr_collection",    "Arranging: collection",    obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_int (props, "arr_sprints_total", "Arranging: total sprints", 1, 12, 1)
+    obs.obs_properties_add_int (props, "arr_focus_mins",    "Arranging: focus mins",    1, 90, 1)
+    obs.obs_properties_add_int (props, "arr_break_mins",    "Arranging: break mins",    1, 60, 1)
+    obs.obs_properties_add_text(props, "_arr_hint",
+        "Boot-time defaults for the 07 Arranging scene. Once Phoenix is connected, chat commands (!task, !done, !info, !piece, !from, !pomo) and the LiveView control panel take over.",
         obs.OBS_TEXT_INFO)
 
     obs.obs_properties_add_button(props, "btn", "Create / Refresh Scenes",
