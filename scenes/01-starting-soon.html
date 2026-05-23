@@ -52,20 +52,35 @@
     const mm = String(t.m).padStart(2,'0');
     const ss = String(t.s).padStart(2,'0');
 
-    return e(Scene, { label: '01 Starting Soon' },
+    return e(Scene, { label: '01 Starting Soon', transparent: true },
+      // Background video is now an OBS Media Source ("IVGO: Starting Soon Video")
+      // layered beneath this browser source — gives OBS-level playback control
+      // (volume, restart, pause, hotkeys) instead of HTML <video>.
+      // Dim wash kept here so chrome stays readable on top of the busy video.
+      e('div', { style:{
+        position:'absolute', inset:0, zIndex:1, pointerEvents:'none',
+        background:'linear-gradient(180deg, rgba(0,0,0,.45) 0%, rgba(0,0,0,.65) 100%)'
+      }}),
       e(HeaderBar),
-      e('div', { className: 'ovl-anim-rise', style: {
-        position:'absolute', inset:'54px 0 36px 24px',
-        display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:26
+      // Top block — logo + IRISH caption pinned near the top so the centre
+      // of the video stays visible.
+      e('div', { className:'ovl-anim-rise', style:{
+        position:'absolute', top:94, left:0, right:0, textAlign:'center', zIndex:2
       }},
-        e('div', { style:{textAlign:'center'} },
-          e('div', { style:{fontFamily:T.mono,fontSize:13,letterSpacing:'.42em',color:T.accent,textTransform:'uppercase',marginBottom:18,textShadow:`0 0 12px ${T.accentGlow}`} }, 'IRISH VIDEO GAME ORCHESTRA'),
-          e('div', { style:{fontFamily:T.display,fontSize:140,fontWeight:900,lineHeight:.92,letterSpacing:'-.01em'} }, 'STARTING', e('br'), 'SHORTLY.'),
-          e('div', { style:{fontFamily:T.mono,fontSize:13,letterSpacing:'.34em',color:T.ink3,textTransform:'uppercase',marginTop:18} }, 'NO IRONY · LOTS OF BRASS')
-        ),
+        e('img', { src:'../brand-assets/IVGO_w.png', alt:'IVGO',
+          style:{ height:120, display:'block', margin:'0 auto 24px', filter:`drop-shadow(0 0 18px ${T.accentGlow})` } }),
+        e('div', { style:{fontFamily:T.mono,fontSize:13,letterSpacing:'.42em',color:T.accent,textTransform:'uppercase',textShadow:`0 0 12px ${T.accentGlow}`} }, 'IRISH VIDEO GAME ORCHESTRA')
+      ),
+      // Bottom block — title + countdown pinned just above the bars so the
+      // middle of the canvas is empty for the background video to read.
+      e('div', { className:'ovl-anim-rise', style:{
+        position:'absolute', bottom:36+80+24, left:0, right:0, textAlign:'center', zIndex:2,
+        display:'flex', flexDirection:'column', alignItems:'center', gap:20
+      }},
+        e('div', { style:{fontFamily:T.display,fontSize:140,fontWeight:900,lineHeight:.92,letterSpacing:'-.01em'} }, 'STARTING', e('br'), 'SOON'),
         e('div', { className:'ovl-chamfer', style:{
-          marginTop:8, background:T.bg2, border:`1px solid ${T.rule2}`,
-          padding:'18px 36px', display:'flex', alignItems:'center', gap:30
+          background:T.bg2, border:`1px solid ${T.rule2}`,
+          padding:'18px 36px', display:'inline-flex', alignItems:'center', gap:30
         }},
           e('div', { style:{fontFamily:T.mono,fontSize:11,letterSpacing:'.28em',color:T.ink2} }, 'STARTING IN'),
           e('div', { style:{display:'flex',alignItems:'baseline',gap:6,fontFamily:T.display,fontWeight:800} },
@@ -78,10 +93,12 @@
             e('div', { style:{fontFamily:T.mono,fontSize:10,letterSpacing:'.24em',color:T.ink3} }, 'NEXT CONCERT'),
             e('div', { style:{fontFamily:T.display,fontSize:18,fontWeight:700,letterSpacing:'.05em'} }, '06.06.2026 · MAC BELFAST')
           )
-        ),
-        e('div', { style:{width:520,height:36,marginTop:8} },
-          e(AudioBars, { count: 28, height: 36, color: T.ink2 })
         )
+      ),
+      // Bars: full-width strip sitting directly on top of the ticker chrome
+      // (ticker is bottom:0 height:36, so bars sit at bottom:36, height:36).
+      e('div', { style:{position:'absolute', left:0, right:0, bottom:36, height:80, zIndex:5} },
+        e(AudioBars, { count: 48, height: 80, color: T.accent, speed: 1.6 })
       ),
       e(Ticker, { items: TICKER.startingSoon })
     );

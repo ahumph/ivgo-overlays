@@ -136,6 +136,41 @@ local function make_browser(name, url)
     return src
 end
 
+local function make_media(name, local_file)
+    -- Return owned FFmpeg Media Source ref, creating or updating settings.
+    -- Used for the looping background videos on 01 Starting Soon / 06 Ending,
+    -- so playback control (volume, restart, pause, hotkeys) lives in OBS
+    -- rather than buried in an HTML <video>.
+    local settings = {
+        local_file          = local_file,
+        is_local_file       = true,
+        looping             = true,
+        restart_on_activate = true,
+        close_when_inactive = true,
+    }
+    local existing = obs.obs_get_source_by_name(name)
+    if existing then
+        local d = obs.obs_source_get_settings(existing)
+        obs.obs_data_set_string(d, "local_file",          settings.local_file)
+        obs.obs_data_set_bool  (d, "is_local_file",       settings.is_local_file)
+        obs.obs_data_set_bool  (d, "looping",             settings.looping)
+        obs.obs_data_set_bool  (d, "restart_on_activate", settings.restart_on_activate)
+        obs.obs_data_set_bool  (d, "close_when_inactive", settings.close_when_inactive)
+        obs.obs_source_update(existing, d)
+        obs.obs_data_release(d)
+        return existing
+    end
+    local d = obs.obs_data_create()
+    obs.obs_data_set_string(d, "local_file",          settings.local_file)
+    obs.obs_data_set_bool  (d, "is_local_file",       settings.is_local_file)
+    obs.obs_data_set_bool  (d, "looping",             settings.looping)
+    obs.obs_data_set_bool  (d, "restart_on_activate", settings.restart_on_activate)
+    obs.obs_data_set_bool  (d, "close_when_inactive", settings.close_when_inactive)
+    local src = obs.obs_source_create("ffmpeg_source", name, d, nil)
+    obs.obs_data_release(d)
+    return src
+end
+
 local function make_capture(name, kind)
     -- Return owned capture source ref (video or game), creating if needed.
     -- Created sources have no device selected — user configures via Properties.
@@ -334,24 +369,57 @@ end
 
 -- ── scene builders ────────────────────────────────────────────────────────────
 
-local function build_starting_soon(base, countdown, socket_url)
+-- Now-Playing overlay: a single "IVGO: Now Playing" browser source that
+-- references the standalone scene served by tools/now-playing-watch.ps1
+-- over HTTP. Adding it to multiple OBS scenes creates separate scene-items
+-- sharing the same source — so visibility/transform is per-scene but the
+-- HTML, label-handle, and !np / !playing listener are configured once.
+--
+-- Requires the watch script to be running:
+--   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\now-playing-watch.ps1
+-- If the script isn't running OBS shows an empty source (no crash) — restart
+-- the script and refresh the source's cache to recover.
+local function build_now_playing(scene, np_base, y_offset)
+    if not np_base or np_base == "" then return end
+    local src = make_browser("IVGO: Now Playing", np_base .. "/scenes/09-now-playing.html?debug=0")
+    if src then
+        -- y_offset shifts the entire 1920×1080 source down by that many px in
+        -- this particular scene, so the !PLAYING label lands further down. The
+        -- source content (label at ~top:154) is near the top of the canvas, so
+        -- the shifted-off bottom is empty space and clips cleanly.
+        place(scene, src, 0, y_offset or 0, 1920, 1080)
+        obs.obs_source_release(src)
+    end
+end
+
+local function build_starting_soon(base, countdown_mins, socket_url, np_base)
     local url = base .. "/01-starting-soon.html"
-    if countdown ~= "" then
-        url = url .. "?target=" .. urlencode(countdown)
+    if countdown_mins and countdown_mins > 0 then
+        url = url .. "?mins=" .. tostring(countdown_mins) .. "&secs=0"
     end
     url = append_socket_url(url, socket_url)
 
     local scene_src = get_scene_source("IVGO · 01 Starting Soon")
     local scene     = obs.obs_scene_from_source(scene_src)
-    local src       = make_browser("IVGO: Starting Soon", url)
+
+    -- Background video — added first so it sits at the bottom of the layer
+    -- stack, below the chrome browser source.
+    local video = make_media("IVGO: Starting Soon Video", repo_dir() .. "/media/buts.mkv")
+    if video then
+        place(scene, video, 0, 0, 1920, 1080)
+        obs.obs_source_release(video)
+    end
+
+    local src = make_browser("IVGO: Starting Soon", url)
     if src then
         place(scene, src, 0, 0, 1920, 1080)
         obs.obs_source_release(src)
     end
+    build_now_playing(scene, np_base)
     obs.obs_source_release(scene_src)
 end
 
-local function build_game(base, socket_url)
+local function build_game(base, socket_url, np_base)
     -- Layer order bottom → top:
     --   1. Game Capture         x:0,    y:0,   w:1920, h:1080 (fit to screen)
     --   2. Host Camera          x:1570, y:64,  w:340,  h:191  (chamfered cutout)
@@ -392,10 +460,13 @@ local function build_game(base, socket_url)
         obs.obs_source_release(chat)
     end
 
+    -- 02 Game's cam PiP sits top-right where the !PLAYING label normally
+    -- lives — shift the now-playing source down 110px so the label clears it.
+    build_now_playing(scene, np_base, 110)
     obs.obs_source_release(scene_src)
 end
 
-local function build_camera(base, socket_url)
+local function build_camera(base, host, host_role, socket_url, np_base)
     -- Layer order bottom → top:
     --   1. Host Camera  x:320, y:180, w:1280, h:720  (centred in frame)
     --   2. 03-camera.html chrome + nameplate (transparent)
@@ -409,16 +480,18 @@ local function build_camera(base, socket_url)
         obs.obs_source_release(cam)
     end
 
-    local overlay = make_browser("IVGO: Camera Overlay", append_socket_url(base .. "/03-camera.html", socket_url))
+    local cam_params = "host=" .. urlencode(host) .. "&hostRole=" .. urlencode(host_role)
+    local overlay = make_browser("IVGO: Camera Overlay", append_socket_url(base .. "/03-camera.html?" .. cam_params, socket_url))
     if overlay then
         place(scene, overlay, 0, 0, 1920, 1080)
         obs.obs_source_release(overlay)
     end
 
+    build_now_playing(scene, np_base)
     obs.obs_source_release(scene_src)
 end
 
-local function build_brb(base, socket_url)
+local function build_brb(base, socket_url, np_base)
     local scene_src = get_scene_source("IVGO · 04 Be Right Back")
     local scene     = obs.obs_scene_from_source(scene_src)
     local src       = make_browser("IVGO: BRB", append_socket_url(base .. "/04-brb.html", socket_url))
@@ -426,10 +499,11 @@ local function build_brb(base, socket_url)
         place(scene, src, 0, 0, 1920, 1080)
         obs.obs_source_release(src)
     end
+    build_now_playing(scene, np_base)
     obs.obs_source_release(scene_src)
 end
 
-local function build_two_cam(base, host, host_role, guest, g_role, topic, socket_url)
+local function build_two_cam(base, host, host_role, guest, g_role, topic, socket_url, np_base)
     -- Layer order bottom → top:
     --   1. Host Camera   x:88,   y:72, w:904, h:858  (left slot)
     --   2. Guest Camera  x:1010, y:72, w:904, h:858  (right slot)
@@ -461,25 +535,37 @@ local function build_two_cam(base, host, host_role, guest, g_role, topic, socket
         obs.obs_source_release(overlay)
     end
 
+    build_now_playing(scene, np_base)
     obs.obs_source_release(scene_src)
 end
 
-local function build_ending(base, socket_url)
+local function build_ending(base, socket_url, np_base)
     local scene_src = get_scene_source("IVGO · 06 Ending")
     local scene     = obs.obs_scene_from_source(scene_src)
-    local src       = make_browser("IVGO: Ending", append_socket_url(base .. "/06-ending.html", socket_url))
+
+    -- Background video — added first so it sits at the bottom of the layer
+    -- stack, below the chrome browser source.
+    local video = make_media("IVGO: Ending Video", repo_dir() .. "/media/tetris.webm")
+    if video then
+        place(scene, video, 0, 0, 1920, 1080)
+        obs.obs_source_release(video)
+    end
+
+    local src = make_browser("IVGO: Ending", append_socket_url(base .. "/06-ending.html", socket_url))
     if src then
         place(scene, src, 0, 0, 1920, 1080)
         obs.obs_source_release(src)
     end
+    build_now_playing(scene, np_base)
     obs.obs_source_release(scene_src)
 end
 
-local function build_arranging(base, piece, collection, sprints_total, focus_mins, break_mins, socket_url)
+local function build_arranging(base, piece, collection, sprints_total, focus_mins, break_mins, socket_url, np_base)
     -- Layer order bottom → top:
     --   1. Screen Capture (display)  x:0,    y:0,    w:1920, h:1080  (notation / DAW)
-    --   2. Host Camera               x:24,   y:72,   w:282,  h:158   (small PiP top-left)
-    --   3. Pianoteq Window           x:252,  y:842,  w:1260, h:192   (live keyboard,
+    --   2. Host Camera               x:10,   y:64,   w:282,  h:158   (small PiP top-left,
+    --                                 10px from viewport left, 10px below header)
+    --   3. Pianoteq Window           x:266,  y:842,  w:1260, h:192   (live keyboard,
     --                                 right-side: 10px gap to chat's left edge)
     --   4. 08-keyboard-frame.html    chamfered outline around the Pianoteq capture.
     --                                 Hide both #3 and #4 (or group them) to remove
@@ -510,7 +596,7 @@ local function build_arranging(base, piece, collection, sprints_total, focus_min
 
     local cam = make_capture("IVGO: Host Camera", cam_type())
     if cam then
-        place(scene, cam, 24, 72, 282, 158)
+        place(scene, cam, 10, 64, 282, 158)
         obs.obs_source_release(cam)
     end
 
@@ -541,7 +627,7 @@ local function build_arranging(base, piece, collection, sprints_total, focus_min
         -- Mask the cropped keyboard band to the chamfered panel shape.
         local mask_path = repo_dir() .. "/media/keyboard-mask.png"
         ensure_alpha_mask(kb, "IVGO Chamfer Mask", mask_path)
-        place(kb_scene, kb, 252, 842, 1260, 192)
+        place(kb_scene, kb, 266, 842, 1260, 192)
         obs.obs_source_release(kb)
     end
 
@@ -559,11 +645,15 @@ local function build_arranging(base, piece, collection, sprints_total, focus_min
         ensure_group(scene, "IVGO: Keyboard", { "IVGO: Pianoteq", "IVGO: Arranging Keyboard Frame" })
     end
 
+    -- Video easter egg: place 10px right of the host cam at the cam's top edge,
+    -- locking height to the cam's 158px so the clip and the cam read as a pair.
     local params = "piece="       .. urlencode(piece)      ..
                    "&collection=" .. urlencode(collection) ..
                    "&total="      .. urlencode(tostring(sprints_total)) ..
                    "&focus_mins=" .. urlencode(tostring(focus_mins)) ..
-                   "&break_mins=" .. urlencode(tostring(break_mins))
+                   "&break_mins=" .. urlencode(tostring(break_mins)) ..
+                   "&toasts_anchor=above-chat-right" ..
+                   "&egg_top=64&egg_left=302&egg_h=158"
 
     local overlay = make_browser("IVGO: Arranging Overlay", append_socket_url(base .. "/07-arranging.html?" .. params, socket_url))
     if overlay then
@@ -583,6 +673,7 @@ local function build_arranging(base, piece, collection, sprints_total, focus_min
         obs.obs_source_release(chat)
     end
 
+    build_now_playing(scene, np_base)
     obs.obs_source_release(scene_src)
 end
 
@@ -593,8 +684,9 @@ local function build_all()
     local guest      = obs.obs_data_get_string(settings_ref, "guest_name")
     local g_role     = obs.obs_data_get_string(settings_ref, "guest_role")
     local topic      = obs.obs_data_get_string(settings_ref, "topic")
-    local countdown  = obs.obs_data_get_string(settings_ref, "countdown")
-    local socket_url = obs.obs_data_get_string(settings_ref, "socket_url")
+    local countdown_mins = obs.obs_data_get_int   (settings_ref, "countdown_mins")
+    local socket_url     = obs.obs_data_get_string(settings_ref, "socket_url")
+    local np_base        = obs.obs_data_get_string(settings_ref, "now_playing_http_base")
 
     local arr_piece         = obs.obs_data_get_string(settings_ref, "arr_piece")
     local arr_collection    = obs.obs_data_get_string(settings_ref, "arr_collection")
@@ -604,13 +696,13 @@ local function build_all()
 
     print("[IVGO] Building scenes from: " .. base)
 
-    build_starting_soon(base, countdown, socket_url)
-    build_game(base, socket_url)
-    build_camera(base, socket_url)
-    build_brb(base, socket_url)
-    build_two_cam(base, host, host_role, guest, g_role, topic, socket_url)
-    build_ending(base, socket_url)
-    build_arranging(base, arr_piece, arr_collection, arr_sprints_total, arr_focus_mins, arr_break_mins, socket_url)
+    build_starting_soon(base, countdown_mins, socket_url, np_base)
+    build_game(base, socket_url, np_base)
+    build_camera(base, host, host_role, socket_url, np_base)
+    build_brb(base, socket_url, np_base)
+    build_two_cam(base, host, host_role, guest, g_role, topic, socket_url, np_base)
+    build_ending(base, socket_url, np_base)
+    build_arranging(base, arr_piece, arr_collection, arr_sprints_total, arr_focus_mins, arr_break_mins, socket_url, np_base)
 
     print("[IVGO] Done — 7 scenes created / refreshed.")
 end
@@ -637,8 +729,9 @@ function script_defaults(settings)
     obs.obs_data_set_default_string(settings, "guest_name", "GUEST NAME")
     obs.obs_data_set_default_string(settings, "guest_role", "ROLE")
     obs.obs_data_set_default_string(settings, "topic",      "WHY VIDEO GAME MUSIC DESERVES A FULL ORCHESTRA")
-    obs.obs_data_set_default_string(settings, "countdown",  "2026-06-06T19:00:00Z")
+    obs.obs_data_set_default_int   (settings, "countdown_mins", 5)
     obs.obs_data_set_default_string(settings, "socket_url", "wss://ivgorchestra.fly.dev/overlay")
+    obs.obs_data_set_default_string(settings, "now_playing_http_base", "http://localhost:7779")
 
     obs.obs_data_set_default_string(settings, "arr_piece",         "AERITH'S SUITE")
     obs.obs_data_set_default_string(settings, "arr_collection",    "FINAL FANTASY VII REBIRTH")
@@ -670,13 +763,18 @@ function script_properties()
     obs.obs_properties_add_text(props, "_topic_hint",
         "Shown in the topic strip of the Two-Camera scene.",
         obs.OBS_TEXT_INFO)
-    obs.obs_properties_add_text(props, "countdown",  "Countdown",  obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_int (props, "countdown_mins", "Countdown (mins)", 0, 120, 1)
     obs.obs_properties_add_text(props, "_countdown_hint",
-        "Format: YYYY-MM-DDTHH:MM:SSZ (UTC). Example: 2026-06-06T18:00:00Z = 7pm BST. Leave blank for static screen.",
+        "Minutes the 01 Starting Soon countdown starts at when the scene loads. 0 to hide. Can also be overridden per-source via ?mins=<n> on the browser-source URL.",
         obs.OBS_TEXT_INFO)
     obs.obs_properties_add_text(props, "socket_url", "Socket URL", obs.OBS_TEXT_DEFAULT)
     obs.obs_properties_add_text(props, "_socket_hint",
         "Local: ws://localhost:4000/overlay   Live: wss://ivgorchestra.fly.dev/overlay",
+        obs.OBS_TEXT_INFO)
+
+    obs.obs_properties_add_text(props, "now_playing_http_base", "Now-Playing HTTP base", obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_text(props, "_now_playing_hint",
+        "URL of the SMTC watch script's HTTP server. Default http://localhost:7779 — leave blank to skip the now-playing overlay entirely. Run tools/now-playing-watch.ps1 before streaming so this resolves.",
         obs.OBS_TEXT_INFO)
 
     obs.obs_properties_add_text(props, "arr_piece",         "Arranging: piece",         obs.OBS_TEXT_DEFAULT)

@@ -100,9 +100,9 @@
     return e(Scene, { label: '07 Arranging', transparent: true },
       e(HeaderBar),
 
-      // Sprint timer — top-right, just under header
+      // Sprint timer — top-right, 10px from the right edge and 10px under the header.
       e('div', { className: 'ovl-anim-rise', style: {
-        position:'absolute', right:24, top:54+18
+        position:'absolute', right:10, top:54+10
       }},
         e(SprintTimer, {
           phase,
@@ -113,9 +113,10 @@
         })
       ),
 
-      // Tasks — under cam slot (cam is at 24,72,282x158, so list anchors at top: 240)
+      // Tasks — under cam slot (cam now at 10,64,282x158, so list anchors at top: 232:
+      // 64 + 158 (cam height) + 10 (gap)).
       e('div', { className: 'ovl-anim-rail', style: {
-        position:'absolute', left:24, top:240, width:282
+        position:'absolute', left:10, top:232, width:282
       }},
         e(TaskList, { tasks, cap: 6, width: 282 })
       ),
@@ -124,12 +125,12 @@
       // Open  → translateY(0): label sits at the top edge of the panel, panel above ticker.
       // Close → translateY(192px): panel drops behind the ticker (zIndex below it),
       //          leaving the label resting on top of the bottom bar as a viewer hint.
-      // Right offset: 24 (chat margin) + 374 (chat rendered: content 340 + padding 16+16 + border 1+1) + 16 (gap)
+      // Right offset: 10 (chat margin) + 374 (chat rendered: content 340 + padding 16+16 + border 1+1) + 16 (gap)
       // Container left:86 — pulled in so the panel's 10px chamfer ends exactly at
       // the label's left edge (label at viewport x=96, chamfer flat-top starts at
       // panel_left + 10 = 86 + 10 = 96).
       e('div', { style: {
-        position:'absolute', left:86, right:24+374+16, bottom:36+10,
+        position:'absolute', left:86, right:10+374+16, bottom:36+10,
         height:24+192, zIndex:5,
         // Closed state slides down by panel-height + the 10px gap, so the label-handle
         // ends up flush with the ticker's top edge (not floating 10px above it).

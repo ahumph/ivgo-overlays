@@ -143,7 +143,7 @@ const _bus = (function () {
       _socket.connect();
 
       _channel = _socket.channel('overlay:events', {});
-      ['channel.follow', 'channel.subscribe', 'channel.subscription.gift', 'channel.cheer'].forEach(type => {
+      ['channel.follow', 'channel.subscribe', 'channel.subscription.gift', 'channel.cheer', 'channel.raid'].forEach(type => {
         _channel.on(type, payload => dispatch(type, payload));
       });
       _channel.join()
@@ -184,7 +184,19 @@ const _toast = (function () {
   function getContainer() {
     if (container) return container;
     container = document.createElement('div');
-    container.style.cssText = 'position:fixed;bottom:46px;left:10px;display:flex;flex-direction:column-reverse;gap:8px;z-index:9999;pointer-events:none';
+    // Anchor configurable via URL param so scenes with a right-column chat
+    // (e.g. 07 Arranging) can route toasts above the chat instead of into
+    // the bottom-left where toasts overlap event-feed activity.
+    //   default          → bottom:46px, left:10px
+    //   above-chat-right → bottom:550px (10px above the chat's top edge at y=540), right:10px
+    const anchor = new URLSearchParams(location.search).get('toasts_anchor') || 'bl';
+    let anchorCss;
+    if (anchor === 'above-chat-right') {
+      anchorCss = 'bottom:550px;right:10px;align-items:flex-end';
+    } else {
+      anchorCss = 'bottom:46px;left:10px';
+    }
+    container.style.cssText = 'position:fixed;' + anchorCss + ';display:flex;flex-direction:column-reverse;gap:8px;z-index:9999;pointer-events:none';
     document.body.appendChild(container);
     return container;
   }
@@ -312,6 +324,12 @@ const _toast = (function () {
         line2: opts.message ? opts.message.slice(0, 60) : null,
         accent: T.amber,
       },
+      raid: {
+        label: 'RAID',
+        line1: (opts.user_name || 'Someone') + ' raided with ' + (opts.viewers || 0),
+        line2: null,
+        accent: T.amber,
+      },
     };
 
     const item = map[opts.type];
@@ -321,13 +339,157 @@ const _toast = (function () {
   return { toast };
 })();
 
-// Auto-wire Twitch events to toasts
+// ── VideoEgg ──────────────────────────────────────────────────────────────
+// Plays a short video clip when a follow/sub/gift (alrighty) or raid arrives.
+// Priority queue: raid interrupts alrighty (interrupted alrighty resumes after
+// the raid ends, drained via pendingNormal). Same-priority triggers queue
+// with last-wins semantics so we never play the same clip twice back-to-back.
+//
+// Per-scene placement is configurable via URL params, since scenes differ in
+// where they want the clip to land:
+//   egg_top    (default 64)     px from viewport top
+//   egg_left   (default 10)     px from viewport left
+//   egg_h      (default null)   if set, locks height and scales width by the
+//                                clip's natural aspect; otherwise uses the
+//                                clip's natural w/h.
+//   egg_off    (default false)  set to "1" to disable on this scene entirely.
+const _videoEgg = (function () {
+  const CLIPS = {
+    alrighty: { src: '../media/alrighty-then.mp4', w: 480, h: 270, border: T.rule2, priority: 1 },
+    raid:     { src: '../media/raid.mp4',          w: 480, h: 480, border: T.amber, priority: 2 },
+  };
+
+  const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : null;
+  const DISABLED = params && params.get('egg_off') === '1';
+  const EGG_TOP  = params && params.get('egg_top')  != null ? parseInt(params.get('egg_top'),  10) : 64;
+  const EGG_LEFT = params && params.get('egg_left') != null ? parseInt(params.get('egg_left'), 10) : 10;
+  const EGG_H    = params && params.get('egg_h')    != null ? parseInt(params.get('egg_h'),    10) : null;
+
+  let containerEl = null;
+  let videoEl = null;
+  let current = null;
+  let pendingHigh = false;
+  let pendingNormal = false;
+  let lastSrc = null;
+  // playGen guards against a stale .catch() from an interrupted play()
+  // resetting state after a new clip has already started.
+  let playGen = 0;
+
+  function ensureMounted() {
+    if (containerEl) return;
+    containerEl = document.createElement('div');
+    containerEl.className = 'ovl-chamfer-sm';
+    // z-index:9 sits above HeaderBar (5) and Ticker (6) but below toasts
+    // (9999) so a toast popping during a clip overlays cleanly.
+    containerEl.style.cssText = [
+      'position:fixed',
+      'top:' + EGG_TOP + 'px',
+      'left:' + EGG_LEFT + 'px',
+      'opacity:0',
+      'pointer-events:none',
+      'transition:opacity 250ms ease',
+      'z-index:9',
+      'background:#000',
+      'overflow:hidden',
+      'box-shadow:0 4px 24px rgba(0,0,0,.5)',
+    ].join(';');
+
+    videoEl = document.createElement('video');
+    videoEl.preload = 'auto';
+    videoEl.playsInline = true;
+    videoEl.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
+    videoEl.addEventListener('ended', onEnded);
+    videoEl.addEventListener('error', onError);
+
+    containerEl.appendChild(videoEl);
+    document.body.appendChild(containerEl);
+  }
+
+  function applyClip(clip) {
+    const h = EGG_H != null ? EGG_H : clip.h;
+    const w = EGG_H != null ? Math.round(EGG_H * clip.w / clip.h) : clip.w;
+    containerEl.style.width  = w + 'px';
+    containerEl.style.height = h + 'px';
+    containerEl.style.border = '1px solid ' + clip.border;
+    if (lastSrc !== clip.src) {
+      videoEl.src = clip.src;
+      lastSrc = clip.src;
+    }
+  }
+
+  function hide() {
+    if (containerEl) containerEl.style.opacity = '0';
+  }
+
+  function reset() {
+    current = null;
+    pendingHigh = false;
+    pendingNormal = false;
+    hide();
+  }
+
+  function play(clipName) {
+    const clip = CLIPS[clipName];
+    if (!clip) return;
+    ensureMounted();
+    current = clipName;
+    applyClip(clip);
+    containerEl.style.opacity = '1';
+
+    const myGen = ++playGen;
+    videoEl.currentTime = 0;
+    videoEl.play().catch(err => {
+      if (myGen !== playGen) return;   // stale: a newer play() superseded us
+      console.warn('[IVGO videoEgg] play() rejected:', err);
+      reset();
+    });
+  }
+
+  function onEnded() {
+    if (pendingHigh)   { pendingHigh   = false; play('raid');     return; }
+    if (pendingNormal) { pendingNormal = false; play('alrighty'); return; }
+    current = null;
+    hide();
+  }
+
+  function onError(e) {
+    console.warn('[IVGO videoEgg] video error', e);
+    reset();
+  }
+
+  function trigger(clipName) {
+    if (DISABLED) return;
+    const clip = CLIPS[clipName];
+    if (!clip) return;
+    if (current === null) { play(clipName); return; }
+    if (clipName === 'raid' && current !== 'raid') {
+      if (current === 'alrighty') pendingNormal = true;
+      play('raid');
+      return;
+    }
+    if (clip.priority >= 2) pendingHigh = true;
+    else pendingNormal = true;
+  }
+
+  return {
+    alrighty: function () { trigger('alrighty'); },
+    raid:     function () { trigger('raid'); },
+  };
+})();
+
+// Auto-wire Twitch events to toasts and video easter egg
 if (typeof document !== 'undefined') {
   document.addEventListener('DOMContentLoaded', function () {
     _bus.on('channel.follow', p => _toast.toast({ type: 'follow', ...p }));
     _bus.on('channel.subscribe', p => _toast.toast({ type: 'sub', ...p }));
     _bus.on('channel.subscription.gift', p => _toast.toast({ type: 'gift', ...p }));
     _bus.on('channel.cheer', p => _toast.toast({ type: 'cheer', ...p }));
+    _bus.on('channel.raid', p => _toast.toast({ type: 'raid', ...p }));
+
+    _bus.on('channel.follow',            () => _videoEgg.alrighty());
+    _bus.on('channel.subscribe',         () => _videoEgg.alrighty());
+    _bus.on('channel.subscription.gift', () => _videoEgg.alrighty());
+    _bus.on('channel.raid',              () => _videoEgg.raid());
   });
 }
 
@@ -474,16 +636,19 @@ function MetaLine({items}) {
   );
 }
 
-function AudioBars({count = 22, color = T.accent, height = 42}) {
+function AudioBars({count = 22, color = T.accent, height = 42, speed = 1}) {
+  // speed: multiplier on each bar's animation duration. 1 = original cadence;
+  // >1 slower, <1 faster. Per-scene tuning so a calm "Starting Soon" can sit
+  // at speed=1.6 without slowing the BRB bars.
   const bars = Array.from({length: count});
   const anims = ['ovl-bar1','ovl-bar2','ovl-bar3','ovl-bar4','ovl-bar5'];
   return React.createElement('div', {style:{display:'flex',alignItems:'flex-end',gap:3,height,width:'100%'}},
     bars.map((_,i) => React.createElement('div', {key:i, style:{
       flex:1,
-      background:`linear-gradient(180deg, ${color} 0%, ${T.accentDeep} 100%)`,
+      background: color,
       boxShadow:`0 0 6px ${T.accentGlow}`,
       opacity:.92,
-      animation:`${anims[i % anims.length]} ${0.9 + (i%5)*0.18}s ease-in-out ${(i%7)*0.08}s infinite`
+      animation:`${anims[i % anims.length]} ${(0.9 + (i%5)*0.18) * speed}s ease-in-out ${(i%7)*0.08}s infinite`
     }}))
   );
 }
@@ -821,7 +986,13 @@ function SprintTimer({
   return React.createElement('div', {className:'ovl-chamfer-sm', style:{
     background:'rgba(6,8,10,.78)', backdropFilter:'blur(8px)',
     border:`1px solid ${T.rule2}`, padding:'12px 16px',
-    display:'flex', alignItems:'center', gap:18, minWidth: 320
+    display:'flex', alignItems:'center', gap:18,
+    // border-box width:284 — matches the cam-outline's rendered outer width
+    // (cam-outline is 282 content + 2 border = 284). Content area = 250,
+    // which is tight for the FOCUS-SPRINT + MM:SS + SPRINT N/T + dots layout;
+    // if labels start clipping with longer phases, drop the phase fontSize
+    // 10→9 and gap 18→14 below to free ~14px.
+    width: 340, boxSizing: 'border-box'
   }},
     React.createElement('div', {style:{display:'flex',flexDirection:'column',gap:4,flex:1}},
       React.createElement('div', {style:{display:'flex',alignItems:'center',gap:8}},

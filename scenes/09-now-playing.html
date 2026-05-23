@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>IVGO · Now Playing</title>
+<meta name="viewport" content="width=1920"/>
+<style>
+  html,body{margin:0;padding:0;background:transparent;width:1920px;height:1080px;overflow:hidden}
+
+  /* Title marquee: pauses at both ends, scrolls the visible amount, returns.
+     --marquee-end is set in JS to the exact px overflow so the scroll bottoms
+     out flush with the right edge of the visible viewport. */
+  @keyframes np-marquee {
+    0%, 14%   { transform: translateX(0); }
+    50%, 64%  { transform: translateX(var(--marquee-end, 0)); }
+    100%      { transform: translateX(0); }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<!-- toasts=0 keeps ivgo-shared.js from opening a Phoenix socket; this scene
+     is fully standalone and reads its data from tools/now-playing.json. -->
+<script src="../ivgo-shared.js"></script>
+
+<script>
+(function () {
+  const { T } = window.IVGO;
+  const e = React.createElement;
+
+  // Compact strip styled to mirror SprintTimer's chrome (ovl-chamfer-sm,
+  // matching padding / border / content width) so the two panels stack as
+  // a visual pair. width:320 content-box → 354px rendered (same as the
+  // SprintTimer at minWidth:320).
+  function NowPlayingCompact({source, track, artist}) {
+    const trackRef = React.useRef(null);
+    const clipRef  = React.useRef(null);
+
+    // After each track change, check whether the title overflows the clip
+    // box. If it does, drive an `np-marquee` animation whose end-stop is the
+    // exact pixel overflow so the right edge of the text lands flush with
+    // the right edge of the visible window.
+    React.useLayoutEffect(() => {
+      const tEl = trackRef.current;
+      const cEl = clipRef.current;
+      if (!tEl || !cEl) return;
+      tEl.style.animation = 'none';
+      tEl.style.transform = 'translateX(0)';
+      void tEl.offsetWidth;   // force reflow so a fresh animation can attach
+      const overflow = tEl.scrollWidth - cEl.clientWidth;
+      if (overflow > 2) {
+        tEl.style.setProperty('--marquee-end', (-overflow) + 'px');
+        // Duration scales with overflow so long titles still read at a
+        // reasonable pace; clamped to a sensible minimum.
+        const ms = Math.max(6000, overflow * 80);
+        tEl.style.animation = `np-marquee ${ms}ms ease-in-out infinite`;
+      }
+    }, [track]);
+
+    return e('div', {
+      className: 'ovl-chamfer-sm',
+      style: {
+        background: 'rgba(6,8,10,.78)',
+        backdropFilter: 'blur(8px)',
+        border: `1px solid ${T.rule2}`,
+        padding: '12px 16px',
+        display: 'flex', flexDirection: 'column', gap: 6,
+        // border-box width:284 matches the cam-outline's rendered outer width
+        // (cam-outline is 282 content + 2 border = 284). Requires the OBS
+        // browser source's transform to be at 1:1 / No bounds, same as the
+        // cam outline source; if these widths look mismatched, that's the
+        // transform, not this value.
+        width: 340, boxSizing: 'border-box'
+      }
+    },
+      e('div', { style: { display:'flex', alignItems:'center', gap:8 }},
+        e('div', { style: { width:6, height:6, background: T.accent, boxShadow: `0 0 8px ${T.accentGlow}` }}),
+        e('div', { style: { fontFamily: T.mono, fontSize: 10, letterSpacing: '.32em', color: T.accent }}, 'NOW PLAYING'),
+        source && e('div', {
+          style: { fontFamily: T.mono, fontSize: 9, letterSpacing: '.28em', color: T.ink3, marginLeft: 'auto' }
+        }, source)
+      ),
+      e('div', { ref: clipRef, style: { overflow: 'hidden' }},
+        e('div', {
+          ref: trackRef,
+          style: {
+            fontFamily: T.display, fontSize: 20, fontWeight: 700, letterSpacing: '.02em',
+            color: T.ink, lineHeight: 1.15,
+            whiteSpace: 'nowrap', display: 'inline-block', willChange: 'transform'
+          }
+        }, track)
+      ),
+      artist && e('div', {
+        style: {
+          fontFamily: T.mono, fontSize: 11, letterSpacing: '.18em', color: T.ink2,
+          textTransform: 'uppercase',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
+        }
+      }, artist)
+    );
+  }
+
+  // URL params let the same HTML be reused in different positions per scene.
+  const params = new URLSearchParams(location.search);
+  // Default to the same-origin /state endpoint exposed by the watch script's
+  // HTTP server. When loaded over http://localhost:7779 this is hit directly;
+  // a custom override can still point elsewhere via ?state_url=...
+  const stateUrl = params.get('state_url') || '/state';
+  const cssTop    = params.get('top')    != null ? parseInt(params.get('top'),    10) : null;
+  const cssRight  = params.get('right')  != null ? parseInt(params.get('right'),  10) : null;
+  // Label anchor (the always-visible !PLAYING handle). The panel slides in from
+  // behind the label downward when the chat command fires. Defaults to the
+  // top-right, 10px below where the SprintTimer block ends in 07 Arranging.
+  const labelTop   = cssTop   != null ? cssTop   : 154;
+  const labelRight = cssRight != null ? cssRight : 10;
+  // Twitch channel for the !playing / !np listener.
+  const TWITCH_CHANNEL = params.get('channel') || 'irishvideogameorchestra';
+  // How long the panel stays revealed after the command fires.
+  const REVEAL_MS = parseInt(params.get('reveal_ms') || '30000', 10);
+  // Gap between label-handle and the revealed panel.
+  const LABEL_TO_PANEL_GAP = 10;
+  // Label dimensions — kept here so the panel's slide offset matches exactly.
+  const LABEL_HEIGHT = 24;
+
+  // SMTC reports an AUMID like "TIDAL.exe" or "chrome.exe!App.0". Map to a
+  // user-facing tag for the strip's small "NOW PLAYING / <source>" label.
+  function sourceLabel(aumid) {
+    if (!aumid) return 'AUDIO';
+    const lower = aumid.toLowerCase();
+    if (lower.includes('tidal'))   return 'TIDAL';
+    if (lower.includes('chrome') || lower.includes('edge') || lower.includes('firefox')) return 'YOUTUBE';
+    if (lower.includes('spotify')) return 'SPOTIFY';
+    return aumid.split('!')[0].replace(/\.exe$/i, '').toUpperCase();
+  }
+
+  // Temporary visible debug pill — set ?debug=0 to hide.
+  const DEBUG = params.get('debug') !== '0';
+
+  // Persistent !PLAYING label-handle. Greyed when no track is playing,
+  // accent-blue with glow when something is — matching the !INFO label.
+  function PlayingLabel({active, hasTrack}) {
+    const color  = hasTrack ? T.accent : T.ink3;
+    const glow   = hasTrack ? `0 0 12px ${T.accentGlow}` : 'none';
+    return e('div', {
+      style: {
+        height: LABEL_HEIGHT, padding: '0 12px',
+        background: '#06080a',
+        border: `1px solid ${T.rule2}`,
+        borderLeft: `2px solid ${color}`,
+        boxShadow: glow,
+        display: 'flex', alignItems: 'center', gap: 8,
+        fontFamily: T.mono, fontSize: 10, letterSpacing: '.28em',
+        color: hasTrack ? T.ink : T.ink3,
+        opacity: hasTrack ? 1 : 0.65,
+        transition: 'opacity 250ms ease, box-shadow 250ms ease, border-color 250ms ease',
+        boxSizing: 'border-box'
+      }
+    },
+      e('span', { style:{
+        width:6, height:6, background: color,
+        boxShadow: hasTrack ? `0 0 8px ${T.accentGlow}` : 'none'
+      }}),
+      e('span', null, '!PLAYING')
+    );
+  }
+
+  function NowPlaying() {
+    const [state, setState]   = React.useState(null);
+    const [status, setStatus] = React.useState('init');
+    const [active, setActive] = React.useState(false);
+    const activeTimerRef = React.useRef(null);
+    const panelRef       = React.useRef(null);
+    const [panelHeight, setPanelHeight] = React.useState(120);
+
+    const reveal = React.useCallback(() => {
+      // Only reveal if there's actually a track to show.
+      if (!hasTrackRef.current) return;
+      setActive(true);
+      if (activeTimerRef.current) clearTimeout(activeTimerRef.current);
+      activeTimerRef.current = setTimeout(() => setActive(false), REVEAL_MS);
+    }, []);
+
+    // Track whether there's currently a track, accessible from the IRC
+    // callback without re-binding the listener on every state change.
+    const hasTrackRef = React.useRef(false);
+    React.useEffect(() => { hasTrackRef.current = !!(state && state.title); }, [state]);
+
+    // SMTC state poll (every 2s).
+    React.useEffect(() => {
+      let cancelled = false;
+      async function poll() {
+        try {
+          const res = await fetch(stateUrl + '?t=' + Date.now());
+          if (!res.ok) throw new Error('http ' + res.status);
+          const data = await res.json();
+          if (cancelled) return;
+          setState(data);
+          setStatus(data ? 'ok' : 'null');
+        } catch (err) {
+          if (cancelled) return;
+          setState(null);
+          setStatus('err: ' + (err && err.message || err));
+        }
+      }
+      poll();
+      const id = setInterval(poll, 2000);
+      return () => { cancelled = true; clearInterval(id); };
+    }, []);
+
+    // Measure the panel's actual rendered height so the slide offset hides
+    // it fully when idle (no half-poking-out below the label).
+    React.useLayoutEffect(() => {
+      if (panelRef.current) setPanelHeight(panelRef.current.offsetHeight);
+    }, [state]);
+
+    // Twitch IRC listener — anonymous read-only, same pattern as ChatPanel.
+    // Listens for !playing or !np anywhere in a chat message.
+    React.useEffect(() => {
+      const ws = new WebSocket('wss://irc-ws.chat.twitch.tv');
+      ws.onopen = () => {
+        ws.send('CAP REQ :twitch.tv/tags');
+        ws.send('PASS SCHMOOPIIE');
+        ws.send('NICK justinfan' + Math.floor(Math.random() * 99999));
+        ws.send('JOIN #' + TWITCH_CHANNEL.toLowerCase());
+      };
+      ws.onmessage = (ev) => {
+        ev.data.split('\r\n').filter(Boolean).forEach(line => {
+          if (line.startsWith('PING')) { ws.send('PONG :tmi.twitch.tv'); return; }
+          const m = line.match(/PRIVMSG #\S+ :(.+)$/);
+          if (!m) return;
+          const text = m[1].trim().toLowerCase();
+          // Accept "!np" or "!playing" as standalone command at start of message.
+          if (/^!(np|playing)(\s|$)/.test(text)) reveal();
+        });
+      };
+      return () => { try { ws.close(); } catch (_) {} };
+    }, [reveal]);
+
+    const hasTrack = !!(state && state.title);
+
+    const debugPill = DEBUG && e('div', {
+      style: {
+        position:'fixed', top:10, left:10, padding:'4px 8px',
+        background:'rgba(0,0,0,.7)', color:'#fff',
+        fontFamily:'monospace', fontSize:11, zIndex:99999,
+        border:'1px solid ' + T.rule2, pointerEvents:'none'
+      }
+    }, 'np: ' + status + ' · ' + (active ? 'REVEALED' : 'idle') + (state && state.title ? ' · ' + state.title : ''));
+
+    return e(React.Fragment, null,
+      // Label-handle — always at fixed position, right-aligned to viewport.
+      e('div', {
+        style: { position:'absolute', top: labelTop, right: labelRight, zIndex: 2 }
+      },
+        e(PlayingLabel, { active, hasTrack })
+      ),
+      // Slide region — a clip container sized exactly to the panel. The
+      // panel inside translates from -100% (hidden above, clipped out) to
+      // 0% (visible). Only mounted when there's a track to show.
+      hasTrack && e('div', {
+        style: {
+          position: 'absolute',
+          top: labelTop + LABEL_HEIGHT + LABEL_TO_PANEL_GAP,
+          right: labelRight,
+          height: panelHeight,
+          overflow: 'hidden',
+          zIndex: 1
+        }
+      },
+        e('div', {
+          style: {
+            transform: active ? 'translateY(0)' : 'translateY(-100%)',
+            transition: 'transform 450ms cubic-bezier(.2,.8,.2,1)'
+          }
+        },
+          e('div', { ref: panelRef },
+            e(NowPlayingCompact, {
+              source: sourceLabel(state.source),
+              track:  state.title,
+              artist: state.artist || ''
+            })
+          )
+        )
+      ),
+      debugPill
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(e(NowPlaying));
+})();
+</script>
+</body>
+</html>

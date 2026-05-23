@@ -1,0 +1,6 @@
+# Live state written by tools/now-playing-watch.ps1 every 2s — never commit.
+tools/now-playing.json
+tools/now-playing.json.tmp
+
+# Test-script output dumps
+tools/smtc-test.out.txt
