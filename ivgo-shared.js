@@ -11,14 +11,23 @@ const EVENTS = [
   'THE ADVENTURE CONTINUES · HELIX DUBLIN · 01.08.2026',
 ];
 
+const SOCIAL = [
+  'IVGORCHESTRA.COM',
+  'REGISTERED CHARITY · BELFAST',
+  'INSTAGRAM · @ivgorchestra',
+  'BLUESKY · @ivgorchestra.com',
+  'YOUTUBE · @IrishVideoGameOrchestra',
+  'TIKTOK · @ivgorchestra',
+];
+
 const TICKER = {
-  startingSoon: [...EVENTS, 'IVGORCHESTRA.COM', 'REGISTERED CHARITY · BELFAST', 'INSTAGRAM · @ivgorchestra', 'BLUESKY · @ivgorchestra.com', 'YOUTUBE · @IrishVideoGameOrchestra', 'TIKTOK · @ivgorchestra'],
-  game:         [...EVENTS, 'IVGORCHESTRA.COM', 'REGISTERED CHARITY · BELFAST', 'INSTAGRAM · @ivgorchestra', 'BLUESKY · @ivgorchestra.com', 'YOUTUBE · @IrishVideoGameOrchestra', 'TIKTOK · @ivgorchestra'],
-  camera:       [...EVENTS, 'IVGORCHESTRA.COM', 'REGISTERED CHARITY · BELFAST', 'INSTAGRAM · @ivgorchestra', 'BLUESKY · @ivgorchestra.com', 'YOUTUBE · @IrishVideoGameOrchestra', 'TIKTOK · @ivgorchestra'],
-  brb:          ['BACK IN A MOMENT', ...EVENTS, 'IVGORCHESTRA.COM', 'REGISTERED CHARITY · BELFAST', 'INSTAGRAM · @ivgorchestra', 'BLUESKY · @ivgorchestra.com', 'YOUTUBE · @IrishVideoGameOrchestra', 'TIKTOK · @ivgorchestra'],
-  twoCam:       ['QUESTIONS WELCOME IN CHAT', ...EVENTS.slice(0, 2), 'IVGORCHESTRA.COM'],
-  ending:       ['THANKS FOR WATCHING', ...EVENTS, 'REGISTERED CHARITY · BELFAST', 'INSTAGRAM · @ivgorchestra', 'BLUESKY · @ivgorchestra.com', 'YOUTUBE · @IrishVideoGameOrchestra', 'TIKTOK · @ivgorchestra'],
-  arranging:    ['WORK ALONG WITH !TASK <TASK> IN CHAT', '!DONE TO TICK OFF A TASK', '!INFO FOR THE CURRENT PIECE', '!POMO TO SEE THE TIMER'],
+  startingSoon: [...EVENTS, ...SOCIAL],
+  game:         [...EVENTS, ...SOCIAL],
+  camera:       [...EVENTS, ...SOCIAL],
+  brb:          [...EVENTS, 'BACK IN A MOMENT', ...SOCIAL],
+  twoCam:       [...EVENTS, 'QUESTIONS WELCOME IN CHAT', ...SOCIAL],
+  ending:       [...EVENTS, 'THANKS FOR WATCHING', ...SOCIAL],
+  arranging:    [...EVENTS, 'WORK ALONG WITH !TASK <TASK> IN CHAT', '!DONE TO TICK OFF A TASK', '!INFO FOR THE CURRENT PIECE', '!POMO TO SEE THE TIMER', ...SOCIAL],
 };
 
 const T = {

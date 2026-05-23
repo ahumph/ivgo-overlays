@@ -209,6 +209,127 @@ local function place(scene, source, x, y, w, h)
     bounds.x, bounds.y = w, h
     obs.obs_sceneitem_set_bounds_type(item, obs.OBS_BOUNDS_SCALE_INNER)
     obs.obs_sceneitem_set_bounds(item, bounds)
+
+    return item
+end
+
+local function set_crop(item, top, bottom, left, right)
+    -- Apply source-side crop to a scene item. Values are in source pixels
+    -- (before bounding-box scaling), matching OBS's Edit Transform dialog.
+    if not item then return end
+    local crop = obs.obs_sceneitem_crop()
+    crop.top    = top
+    crop.bottom = bottom
+    crop.left   = left
+    crop.right  = right
+    obs.obs_sceneitem_set_crop(item, crop)
+end
+
+local function ensure_group(scene, group_name, item_names)
+    -- Best-effort: gather the named scene items and wrap them in an OBS group.
+    -- Idempotent — if a group of this name already exists, no-op. If the Lua
+    -- binding for obs_scene_insert_group misbehaves on this OBS version, the
+    -- sources stay placed (just ungrouped) and the user can right-click →
+    -- Group Selected Items in the Sources panel.
+    local existing = obs.obs_get_source_by_name(group_name)
+    if existing then
+        obs.obs_source_release(existing)
+        return
+    end
+
+    if not obs.obs_scene_insert_group then return end
+
+    local order = {}
+    for i, n in ipairs(item_names) do order[n] = i end
+
+    local items = obs.obs_scene_enum_items(scene)
+    if not items then return end
+
+    local found = {}
+    for _, it in ipairs(items) do
+        local n = obs.obs_source_get_name(obs.obs_sceneitem_get_source(it))
+        if order[n] then found[order[n]] = it end
+    end
+
+    local payload = {}
+    for i = 1, #item_names do
+        if not found[i] then
+            obs.sceneitem_list_release(items)
+            return
+        end
+        payload[#payload + 1] = found[i]
+    end
+
+    local ok, err = pcall(function()
+        obs.obs_scene_insert_group(scene, group_name, payload)
+    end)
+    if not ok then
+        print("[IVGO] Auto-group failed (" .. tostring(err) .. "); please group manually.")
+    end
+
+    obs.sceneitem_list_release(items)
+end
+
+local function ensure_crop_filter(source, name, top, bottom, left, right)
+    -- Attach (or update) a Crop/Pad source filter. Runs at the source level
+    -- so it executes BEFORE any subsequent filter (notably the chamfer mask),
+    -- unlike scene-item crop which runs after filters.
+    if not source then return end
+    local existing = obs.obs_source_get_filter_by_name(source, name)
+    if existing then
+        local d = obs.obs_source_get_settings(existing)
+        obs.obs_data_set_int (d, "top",    top)
+        obs.obs_data_set_int (d, "bottom", bottom)
+        obs.obs_data_set_int (d, "left",   left)
+        obs.obs_data_set_int (d, "right",  right)
+        obs.obs_data_set_bool(d, "relative", true)
+        obs.obs_source_update(existing, d)
+        obs.obs_data_release(d)
+        obs.obs_source_release(existing)
+        return
+    end
+    local d = obs.obs_data_create()
+    obs.obs_data_set_int (d, "top",    top)
+    obs.obs_data_set_int (d, "bottom", bottom)
+    obs.obs_data_set_int (d, "left",   left)
+    obs.obs_data_set_int (d, "right",  right)
+    obs.obs_data_set_bool(d, "relative", true)
+    local filter = obs.obs_source_create_private("crop_filter", name, d)
+    obs.obs_data_release(d)
+    if filter then
+        obs.obs_source_filter_add(source, filter)
+        obs.obs_source_release(filter)
+    end
+end
+
+local function ensure_alpha_mask(source, name, image_path)
+    -- Attach (or update) an "Image Mask/Blend" filter set to "Alpha Mask
+    -- (Alpha Channel)" so the source is clipped to the mask PNG's opaque
+    -- pixels. Stretches the mask to the post-filter source dimensions so
+    -- the chamfered shape scales with the cropped keyboard band rather
+    -- than the original Pianoteq window. Idempotent.
+    if not source then return end
+    local existing = obs.obs_source_get_filter_by_name(source, name)
+    if existing then
+        local d = obs.obs_source_get_settings(existing)
+        obs.obs_data_set_string(d, "image_path", image_path)
+        obs.obs_data_set_string(d, "type", "mask_alpha_filter.effect")
+        obs.obs_data_set_bool  (d, "stretch", true)
+        obs.obs_source_update(existing, d)
+        obs.obs_data_release(d)
+        obs.obs_source_release(existing)
+        return
+    end
+    local d = obs.obs_data_create()
+    obs.obs_data_set_string(d, "type", "mask_alpha_filter.effect")
+    obs.obs_data_set_string(d, "image_path", image_path)
+    obs.obs_data_set_bool  (d, "stretch", true)
+    local filter = obs.obs_source_create_private("mask_filter", name, d)
+    obs.obs_data_release(d)
+    if filter then
+        obs.obs_source_filter_add(source, filter)
+        obs.obs_source_release(filter)
+    end
 end
 
 -- ── scene builders ────────────────────────────────────────────────────────────
@@ -356,14 +477,22 @@ end
 
 local function build_arranging(base, piece, collection, sprints_total, focus_mins, break_mins, socket_url)
     -- Layer order bottom → top:
-    --   1. Screen Capture (display)  x:0,  y:0,    w:1920, h:1080  (notation / DAW)
-    --   2. Host Camera               x:24, y:72,   w:282,  h:158   (small PiP top-left)
-    --   3. 07-arranging.html         chrome: header, task list, pomo timer, ticker.
+    --   1. Screen Capture (display)  x:0,    y:0,    w:1920, h:1080  (notation / DAW)
+    --   2. Host Camera               x:24,   y:72,   w:282,  h:158   (small PiP top-left)
+    --   3. Pianoteq Window           x:252,  y:842,  w:1260, h:192   (live keyboard,
+    --                                 right-side: 10px gap to chat's left edge)
+    --   4. 08-keyboard-frame.html    chamfered outline around the Pianoteq capture.
+    --                                 Hide both #3 and #4 (or group them) to remove
+    --                                 the keyboard from the scene without losing the
+    --                                 placement.
+    --   5. 07-arranging.html         chrome: header, task list, pomo timer, ticker,
+    --                                 and the sliding info panel — sits above the
+    --                                 keyboard so the panel covers it when !info fires.
     --                                 The "ON THE DESK" workbench strip is hidden by
     --                                 default and only surfaces for 10s when chat
     --                                 fires !info (or a mod changes !piece / !from).
-    --   4. 07-cam-outline.html       cam border frame + "AT THE DESK" badge
-    --   5. 07-chat.html              chat panel (right column)
+    --   6. 07-cam-outline.html       cam border frame + "AT THE DESK" badge
+    --   7. 07-chat.html              chat panel (right column)
 
     local scene_src = get_scene_source("IVGO · 07 Arranging")
     local scene     = obs.obs_scene_from_source(scene_src)
@@ -383,6 +512,51 @@ local function build_arranging(base, piece, collection, sprints_total, focus_min
     if cam then
         place(scene, cam, 24, 72, 282, 158)
         obs.obs_source_release(cam)
+    end
+
+    -- Pianoteq window capture + chamfered frame overlay. If the user has
+    -- already wrapped them in an "IVGO: Keyboard" group (manually, since
+    -- OBS's Lua group API is unreliable), place items into the group's
+    -- internal scene instead of the parent — that way re-runs of the
+    -- installer don't drop fresh top-level copies alongside the grouped
+    -- ones. Group items use coords relative to the group's transform;
+    -- when the group is at (0,0,1920,1080) they're identical to scene coords.
+    local kb_scene = scene
+    local kb_group_src = obs.obs_get_source_by_name("IVGO: Keyboard")
+    if kb_group_src then
+        local g = obs.obs_group_from_source(kb_group_src)
+        if g then kb_scene = g end
+        obs.obs_source_release(kb_group_src)
+    end
+
+    local kb = make_capture("IVGO: Pianoteq", "window_capture")
+    if kb then
+        -- Crop is applied as a source filter (not scene-item crop) so it
+        -- runs BEFORE the chamfer mask in the filter chain. Otherwise the
+        -- mask would clip the full Pianoteq window and the cropped keyboard
+        -- band would never intersect the chamfered region.
+        --   top=825 drops the GUI panels above the keyboard,
+        --   bottom=2 / left=35 / right=41 are small bezel trims.
+        ensure_crop_filter(kb, "IVGO Keyboard Crop", 825, 2, 35, 41)
+        -- Mask the cropped keyboard band to the chamfered panel shape.
+        local mask_path = repo_dir() .. "/media/keyboard-mask.png"
+        ensure_alpha_mask(kb, "IVGO Chamfer Mask", mask_path)
+        place(kb_scene, kb, 252, 842, 1260, 192)
+        obs.obs_source_release(kb)
+    end
+
+    local kb_frame = make_browser("IVGO: Arranging Keyboard Frame", base .. "/08-keyboard-frame.html?toasts=0")
+    if kb_frame then
+        place(kb_scene, kb_frame, 0, 0, 1920, 1080)
+        obs.obs_source_release(kb_frame)
+    end
+
+    -- Best-effort auto-group when there's no existing group. Falls back to a
+    -- log message if obs_scene_insert_group isn't behaving in this OBS version,
+    -- in which case the user does the 3-click manual group once and subsequent
+    -- runs land in the kb_scene branch above.
+    if kb_scene == scene then
+        ensure_group(scene, "IVGO: Keyboard", { "IVGO: Pianoteq", "IVGO: Arranging Keyboard Frame" })
     end
 
     local params = "piece="       .. urlencode(piece)      ..

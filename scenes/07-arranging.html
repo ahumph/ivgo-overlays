@@ -19,7 +19,7 @@
 <script>
 (function () {
   const {
-    Scene, HeaderBar, Ticker, TICKER,
+    Scene, HeaderBar, Ticker, TICKER, T,
     WorkbenchStrip, SprintTimer, TaskList, bus
   } = window.IVGO;
   const e = React.createElement;
@@ -120,15 +120,46 @@
         e(TaskList, { tasks, cap: 6, width: 282 })
       ),
 
-      // Workbench strip — lower-third, only when !info is fired (or piece/from changes).
-      // Wrapper carries the entrance animation + explicit height so the clip-path'd
-      // WorkbenchStrip inside is a clean child (clip-path + animated `translate`
-      // can render as invisible in some CEF builds, so keep them separated).
+      // Info panel + its !INFO label-handle as a single sliding unit.
+      // Open  → translateY(0): label sits at the top edge of the panel, panel above ticker.
+      // Close → translateY(192px): panel drops behind the ticker (zIndex below it),
+      //          leaving the label resting on top of the bottom bar as a viewer hint.
       // Right offset: 24 (chat margin) + 374 (chat rendered: content 340 + padding 16+16 + border 1+1) + 16 (gap)
-      infoVisible && e('div', { className: 'ovl-toast-enter', style: {
-        position:'absolute', left:24, right:24+374+16, bottom:36+10, height:192, zIndex:50
+      // Container left:86 — pulled in so the panel's 10px chamfer ends exactly at
+      // the label's left edge (label at viewport x=96, chamfer flat-top starts at
+      // panel_left + 10 = 86 + 10 = 96).
+      e('div', { style: {
+        position:'absolute', left:86, right:24+374+16, bottom:36+10,
+        height:24+192, zIndex:5,
+        // Closed state slides down by panel-height + the 10px gap, so the label-handle
+        // ends up flush with the ticker's top edge (not floating 10px above it).
+        transform: infoVisible ? 'translateY(0)' : 'translateY(202px)',
+        transition: 'transform 450ms cubic-bezier(.2,.8,.2,1)'
       }},
-        e(WorkbenchStrip, { piece, collection, gif })
+        // Label-handle — sits flush with the panel's top edge.
+        // left:10 inside the container (container is at viewport left:86) so the
+        // label's left edge lands at viewport x=96 — same as where the panel's
+        // 10px chamfer transitions into the flat top edge.
+        e('div', { style: {
+          position:'absolute', left:10, top:0, height:24,
+          padding:'0 12px',
+          background:'#06080a',
+          border:`1px solid ${T.rule2}`,
+          borderLeft:`2px solid ${T.accent}`,
+          boxShadow:`0 0 12px ${T.accentGlow}`,
+          display:'flex', alignItems:'center', gap:8,
+          fontFamily:T.mono, fontSize:10, letterSpacing:'.28em',
+          color:T.ink
+        }},
+          e('span', { style:{width:6, height:6, background:T.accent, boxShadow:`0 0 8px ${T.accentGlow}`}}),
+          e('span', null, '!INFO')
+        ),
+        // Panel proper — directly below the label.
+        e('div', { style: {
+          position:'absolute', left:0, right:0, top:24, height:192
+        }},
+          e(WorkbenchStrip, { piece, collection, gif })
+        )
       ),
 
       e(Ticker, { items: TICKER.arranging })
