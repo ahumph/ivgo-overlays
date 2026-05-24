@@ -33,12 +33,35 @@
   const bootBreakMins  = parseInt(q.get('break_mins') || '5', 10);
   const bootTotal      = parseInt(q.get('total') || '4', 10);
 
+  // ── Convention-based GIF lookup ────────────────────────────────────────────
+  // For each (collection, piece) we try to load:
+  //   ../media/gifs/<collection-slug>__<piece-slug>.gif
+  // If the file exists, it shows in the info-panel's right half. If 404, the
+  // panel renders without a gif. Slugify normalises spaces, punctuation, and
+  // apostrophes so "AERITH'S SUITE" → "aeriths-suite", etc.
+  //
+  // Override via the channel: send workbench_updated.gif = "...some-url..."
+  // AFTER a !piece (since piece changes recompute the convention path and
+  // would otherwise overwrite an override). Channel-set null clears.
+  function slugify(s) {
+    return String(s || '')
+      .toLowerCase()
+      .replace(/['']/g, '')                 // drop apostrophes
+      .replace(/[^a-z0-9]+/g, '-')          // non-alphanum → dash
+      .replace(/^-+|-+$/g, '');             // trim leading/trailing dashes
+  }
+  function gifPathFor(collection, piece) {
+    const c = slugify(collection), p = slugify(piece);
+    if (!c || !p) return null;
+    return `../media/gifs/${c}__${p}.gif`;
+  }
+
   const INFO_VISIBLE_MS = 10_000;
 
   function SceneArranging() {
     const [piece, setPiece]           = React.useState(bootPiece);
     const [collection, setCollection] = React.useState(bootCollection);
-    const [gif, setGif]               = React.useState('../media/metal-gear.gif');  // TEMP: visual smoke-test
+    const [gif, setGif]               = React.useState(null);
     const [tasks, setTasks]           = React.useState([]);
     const [pomo, setPomo] = React.useState({
       phase: 'idle',
@@ -56,6 +79,21 @@
       if (infoTimerRef.current) clearTimeout(infoTimerRef.current);
       infoTimerRef.current = setTimeout(() => setInfoVisible(false), INFO_VISIBLE_MS);
     }, []);
+
+    // Auto-load the convention-named GIF whenever piece/collection changes.
+    // Uses an Image() preload so a missing file fails silently (no broken-image
+    // flash, no console error). Channel-driven `gif` (a !gif <url> override)
+    // can re-set this afterward — but the next !piece will recompute.
+    React.useEffect(() => {
+      const path = gifPathFor(collection, piece);
+      if (!path) { setGif(null); return; }
+      const img = new Image();
+      let cancelled = false;
+      img.onload  = () => { if (!cancelled) setGif(path); };
+      img.onerror = () => { if (!cancelled) setGif(null); };
+      img.src = path;
+      return () => { cancelled = true; };
+    }, [collection, piece]);
 
     React.useEffect(() => {
       const ch = bus.joinChannel('overlay:arranging');

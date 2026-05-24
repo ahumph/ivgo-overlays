@@ -1063,24 +1063,37 @@ function TaskList({tasks = [], cap = 6, width = 282}) {
             padding:'12px', fontFamily:T.mono, fontSize:10, letterSpacing:'.18em',
             color:T.ink3, textTransform:'uppercase'
           }}, 'DROP A TASK · !task <thing>')
-        : visible.map(t => React.createElement('div', {key:t.id, style:{
-            padding:'7px 12px', display:'flex', alignItems:'center', gap:8,
-            borderTop:`1px solid ${T.rule}`,
-            opacity: t.done_at ? 0.78 : 1,
-            transition:'opacity 200ms ease'
-          }},
-            checkbox(!!t.done_at),
-            React.createElement('span', {style:{
-              fontFamily:T.mono, fontSize:10, letterSpacing:'.06em',
-              color: _chatColor(t.user_name || t.user_login || 'viewer'),
-              flexShrink:0, fontWeight:600,
-              maxWidth:80, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'
-            }}, t.user_name || t.user_login || 'viewer'),
-            React.createElement('span', {style:{
-              fontFamily:T.sans, fontSize:12, color:T.ink, lineHeight:1.25,
-              overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', minWidth:0, flex:1
-            }}, t.text)
-          ))
+        : visible.map((t, i) => {
+            // Index displayed next to each task so viewers can refer to
+            // them by number (e.g. !done 2 marks task #2). Prefer the
+            // server-assigned `t.index` (stable across done state). Fall
+            // back to in-list position so the column still reads in the
+            // pre-server-wiring period.
+            const n = t.index != null ? t.index : (i + 1);
+            return React.createElement('div', {key:t.id, style:{
+              padding:'7px 12px', display:'flex', alignItems:'center', gap:8,
+              borderTop:`1px solid ${T.rule}`,
+              opacity: t.done_at ? 0.78 : 1,
+              transition:'opacity 200ms ease'
+            }},
+              checkbox(!!t.done_at),
+              React.createElement('span', {style:{
+                fontFamily:T.mono, fontSize:10, letterSpacing:'.06em',
+                color: T.ink3, fontWeight:600,
+                minWidth:16, textAlign:'right', flexShrink:0
+              }}, n + '.'),
+              React.createElement('span', {style:{
+                fontFamily:T.mono, fontSize:10, letterSpacing:'.06em',
+                color: _chatColor(t.user_name || t.user_login || 'viewer'),
+                flexShrink:0, fontWeight:600,
+                maxWidth:80, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'
+              }}, t.user_name || t.user_login || 'viewer'),
+              React.createElement('span', {style:{
+                fontFamily:T.sans, fontSize:12, color:T.ink, lineHeight:1.25,
+                overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', minWidth:0, flex:1
+              }}, t.text)
+            );
+          })
     )
   );
 }
