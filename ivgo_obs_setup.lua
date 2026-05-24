@@ -379,6 +379,20 @@ end
 --   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\now-playing-watch.ps1
 -- If the script isn't running OBS shows an empty source (no crash) — restart
 -- the script and refresh the source's cache to recover.
+-- Fire overlay (chat !fine reward): a single "IVGO: Fire Overlay" browser
+-- source layered on the topmost row of every main scene. Same source
+-- referenced across scenes — one WebSocket to Phoenix, one Twitch IRC
+-- connection, one configuration. Listens for the `overlay.fire` event on
+-- overlay:events; payload from ivgo-ex once the !fine command lands a
+-- successful Ostis deduction.
+local function build_fire(scene, base, socket_url)
+    local src = make_browser("IVGO: Fire Overlay", append_socket_url(base .. "/10-fire.html", socket_url))
+    if src then
+        place(scene, src, 0, 0, 1920, 1080)
+        obs.obs_source_release(src)
+    end
+end
+
 local function build_now_playing(scene, np_base, y_offset)
     if not np_base or np_base == "" then return end
     local src = make_browser("IVGO: Now Playing", np_base .. "/scenes/09-now-playing.html?debug=0")
@@ -416,6 +430,7 @@ local function build_starting_soon(base, countdown_mins, socket_url, np_base)
         obs.obs_source_release(src)
     end
     build_now_playing(scene, np_base)
+    build_fire(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
 
@@ -463,6 +478,7 @@ local function build_game(base, socket_url, np_base)
     -- 02 Game's cam PiP sits top-right where the !PLAYING label normally
     -- lives — shift the now-playing source down 110px so the label clears it.
     build_now_playing(scene, np_base, 110)
+    build_fire(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
 
@@ -488,6 +504,7 @@ local function build_camera(base, host, host_role, socket_url, np_base)
     end
 
     build_now_playing(scene, np_base)
+    build_fire(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
 
@@ -500,6 +517,7 @@ local function build_brb(base, socket_url, np_base)
         obs.obs_source_release(src)
     end
     build_now_playing(scene, np_base)
+    build_fire(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
 
@@ -536,6 +554,7 @@ local function build_two_cam(base, host, host_role, guest, g_role, topic, socket
     end
 
     build_now_playing(scene, np_base)
+    build_fire(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
 
@@ -557,6 +576,7 @@ local function build_ending(base, socket_url, np_base)
         obs.obs_source_release(src)
     end
     build_now_playing(scene, np_base)
+    build_fire(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
 
@@ -674,6 +694,7 @@ local function build_arranging(base, piece, collection, sprints_total, focus_min
     end
 
     build_now_playing(scene, np_base)
+    build_fire(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
 

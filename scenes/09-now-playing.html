@@ -35,7 +35,7 @@
   // matching padding / border / content width) so the two panels stack as
   // a visual pair. width:320 content-box → 354px rendered (same as the
   // SprintTimer at minWidth:320).
-  function NowPlayingCompact({source, track, artist}) {
+  function NowPlayingCompact({source, track, artist, album}) {
     const trackRef = React.useRef(null);
     const clipRef  = React.useRef(null);
 
@@ -99,7 +99,14 @@
           textTransform: 'uppercase',
           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
         }
-      }, artist)
+      }, artist),
+      album && e('div', {
+        style: {
+          fontFamily: T.mono, fontSize: 10, letterSpacing: '.14em', color: T.ink3,
+          textTransform: 'uppercase',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
+        }
+      }, album)
     );
   }
 
@@ -280,7 +287,8 @@
             e(NowPlayingCompact, {
               source: sourceLabel(state.source),
               track:  state.title,
-              artist: state.artist || ''
+              artist: state.artist || '',
+              album:  state.album  || ''
             })
           )
         )

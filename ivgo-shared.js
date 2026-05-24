@@ -143,7 +143,7 @@ const _bus = (function () {
       _socket.connect();
 
       _channel = _socket.channel('overlay:events', {});
-      ['channel.follow', 'channel.subscribe', 'channel.subscription.gift', 'channel.cheer', 'channel.raid'].forEach(type => {
+      ['channel.follow', 'channel.subscribe', 'channel.subscription.gift', 'channel.cheer', 'channel.raid', 'overlay.fire'].forEach(type => {
         _channel.on(type, payload => dispatch(type, payload));
       });
       _channel.join()

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>IVGO · 10 Fire</title>
+<meta name="viewport" content="width=1920"/>
+<style>
+  html,body{margin:0;padding:0;background:transparent;width:1920px;height:1080px;overflow:hidden}
+
+  /* Fade the overlay in fast, hold for the video, fade out at end. */
+  @keyframes fire-fade-in  { from{opacity:0} to{opacity:1} }
+  @keyframes fire-fade-out { from{opacity:1} to{opacity:0} }
+
+  /* Banner pop — small bounce-in for the chyron at the top. */
+  @keyframes fire-banner-in {
+    0%   { transform: translateY(-32px) scale(.96); opacity:0; }
+    65%  { transform: translateY(0) scale(1.04); opacity:1; }
+    100% { transform: translateY(0) scale(1); opacity:1; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="../phoenix.min.js"></script>
+<script src="../ivgo-shared.js"></script>
+
+<script>
+(function () {
+  const { T, bus } = window.IVGO;
+  const e = React.createElement;
+
+  // Listens for `overlay.fire` events on the Phoenix overlay:events channel
+  // (broadcast by ivgo-ex after a successful !fine — 100 Ostis deducted),
+  // plays media/overlay/fire-alpha.webm looping full-bleed, and shows a
+  // brief chyron crediting the viewer who lit the scene.
+  //
+  // Payload shape (from ivgo-ex):
+  //   { user_name: "viewer123", duration_ms?: number }
+  // duration_ms overrides the default. Video loops continuously so any
+  // duration ≥ the WebM's natural length renders cleanly.
+
+  const DEFAULT_FIRE_MS = 16000;   // Matches the muxed fire-alpha.webm's
+                                   // natural length (video looped 3× inside
+                                   // it to cover the 16s fire-crackle audio).
+  const FADE_OUT_MS     = 600;
+
+  function FireOverlay() {
+    // phase: null | 'in' | 'out'
+    //   'in'  → video playing, container at opacity 1
+    //   'out' → fade-out animation running before unmount
+    const [data, setData]   = React.useState(null);
+    const [phase, setPhase] = React.useState(null);
+    const videoRef = React.useRef(null);
+
+    React.useEffect(() => {
+      bus.on('overlay.fire', (payload) => {
+        const userName   = (payload && payload.user_name) || 'someone';
+        const durationMs = (payload && payload.duration_ms) || DEFAULT_FIRE_MS;
+        // `key` forces a fresh <video> mount so repeated triggers always
+        // restart cleanly even if the previous one was still fading out.
+        setData({ user_name: userName, duration_ms: durationMs, key: Date.now() });
+        setPhase('in');
+      });
+    }, []);
+
+    // One lifecycle per trigger: depend only on `data` so the cleanup doesn't
+    // fire (and clobber the unmount timer) every time `phase` flips. Pause
+    // the <video> on cleanup so the audio actually stops when the source
+    // unmounts (otherwise CEF can keep the audio context alive after the
+    // element leaves the DOM).
+    React.useEffect(() => {
+      if (!data) return;
+
+      if (videoRef.current) {
+        videoRef.current.currentTime = 0;
+        videoRef.current.play().catch(err => console.warn('[fire] play() rejected:', err));
+      }
+      setPhase('in');
+
+      const visibleMs = Math.max(0, data.duration_ms - FADE_OUT_MS);
+      const tFade    = setTimeout(() => setPhase('out'), visibleMs);
+      const tUnmount = setTimeout(() => {
+        if (videoRef.current) videoRef.current.pause();
+        setPhase(null);
+        setData(null);
+      }, data.duration_ms);
+
+      return () => {
+        clearTimeout(tFade);
+        clearTimeout(tUnmount);
+        if (videoRef.current) videoRef.current.pause();
+      };
+    }, [data]);
+
+    if (!data || !phase) return null;
+
+    return e('div', {
+      style: {
+        position: 'absolute', inset: 0, pointerEvents: 'none',
+        animation: phase === 'out'
+          ? `fire-fade-out ${FADE_OUT_MS}ms ease-in both`
+          : 'fire-fade-in 250ms ease-out both'
+      }
+    },
+      // Full-bleed looping fire WebM. Alpha channel composites naturally
+      // over whatever scene is beneath this browser source.
+      e('video', {
+        ref: videoRef,
+        key: data.key,
+        src: '../media/overlay/fire-alpha.webm',
+        autoPlay: true, playsInline: true, loop: true,
+        onError: () => { setPhase(null); setData(null); },
+        style: {
+          position: 'absolute', inset: 0, width: '100%', height: '100%',
+          objectFit: 'cover'
+        }
+      }),
+      // Chyron crediting the viewer who set it off.
+      e('div', {
+        style: {
+          position: 'absolute', top: 80, left: 0, right: 0,
+          textAlign: 'center',
+          fontFamily: T.display, fontSize: 56, fontWeight: 900,
+          letterSpacing: '.02em', color: '#fff',
+          textShadow: '0 4px 24px rgba(255,80,30,0.85), 0 0 60px rgba(255,140,30,0.7)',
+          animation: 'fire-banner-in 600ms cubic-bezier(.2,.8,.2,1) both'
+        }
+      }, `@${data.user_name} set fire to the stream, this is fine`)
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(e(FireOverlay));
+})();
+</script>
+</body>
+</html>
