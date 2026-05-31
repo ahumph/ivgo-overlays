@@ -64,7 +64,7 @@ These appear on the right when the script is selected. All have sensible default
 | **Countdown (mins)** | How long the Starting Soon countdown starts at when the scene loads. `5` = "STARTING IN 05:00". Set to `0` to hide the countdown box entirely. |
 | **Socket URL** | Where the overlay's Phoenix backend lives. Use `wss://ivgorchestra.fly.dev/overlay` for live, `ws://localhost:4000/overlay` for local dev, or leave blank to skip the chat-event integration entirely. |
 | **Now-Playing HTTP base** | URL of the local PowerShell watch script. Default `http://localhost:7779`. Leave blank to skip the Now Playing overlay. |
-| **Arranging: piece / collection** | Boot-time defaults shown on the Arranging scene's "ON THE DESK" info card before chat takes over. |
+| **Arranging: Piece / Game** | Boot-time defaults only — shown on the Arranging scene's "ON THE DESK" info card on first paint. Change live with `!piece` / `!from` in chat. |
 | **Arranging: total sprints / focus mins / break mins** | Pomodoro defaults for the Arranging scene's timer. Chat can override at runtime. |
 
 ### Refreshing the scenes after changing settings
@@ -136,7 +136,43 @@ If the script isn't running, the OBS browser source loads an empty page — no c
 
 ---
 
-## 5 — Re-running and tweaking later
+## 5 — Chat commands
+
+The Phoenix backend (`ivgo-ex`) listens to chat and broadcasts to the overlays. All overlay state — current piece, current game, task list, pomodoro phase — lives on the server, so chat is the source of truth at runtime. The OBS script's Piece/Game fields are boot defaults only; once Phoenix connects, server state takes over.
+
+### Anyone can use
+
+| Command | What it does |
+|---|---|
+| `!task <text>` | Append a task to the Arranging task list under your name. Text capped at 80 chars. 10s cooldown per user. |
+| `!done` | Tick off your oldest open task (green check). 10s cooldown per user. |
+| `!info` | Surface the "ON THE DESK" piece/game card for 10s. 30s global cooldown. |
+| `!pomo` | Bot replies with current phase + time remaining + sprint x/y. 30s cooldown per user. |
+| `!progress` | Bot replies with current piece, game, and open task count. 60s cooldown per user. |
+| `!help` | Bot replies with a one-line command summary. 60s cooldown per user. |
+| `!np` / `!playing` | Slide the Now Playing strip down for 30s (shows current Tidal / YouTube / etc. track). |
+| `!fine` | Trigger the fire overlay. Costs 100 Ostis. |
+
+### Mods + broadcaster only
+
+| Command | What it does |
+|---|---|
+| `!piece <text>` | Update the current PIECE. Auto-triggers `!info`, so the card surfaces immediately. |
+| `!from <text>` | Update the current GAME / collection. Auto-triggers `!info`. |
+| `!pomo focus <mins>` | Set focus length (1–90). |
+| `!pomo break <mins>` | Set break length (1–60). |
+| `!pomo start` | Start the timer. Enters `:focus` if idle. |
+| `!pomo stop` | Pause the timer. Resets the countdown on next start. |
+| `!pomo reset` | Restart the current phase's countdown from the top. |
+| `!pomo next` | Flip phase focus↔break, reset countdown, increment sprint counter on leaving break. |
+| `!task clear` | Wipe all tasks (spam escape hatch). |
+| `!task del <id>` | Remove a specific task by id (id shown in the mod-only LiveView control panel). |
+
+> The timer does **not** auto-advance when it hits zero — phase changes only happen on explicit `!pomo start` / `stop` / `reset` / `next`. This is deliberate: keeps the chat in the loop on cadence.
+
+---
+
+## 6 — Re-running and tweaking later
 
 You can re-run the installer at any time. It will:
 
@@ -160,7 +196,7 @@ It won't duplicate scenes or sources. If you want a clean install, delete the sc
 
 ---
 
-## 6 — Manual / custom setup (alternative)
+## 7 — Manual / custom setup (alternative)
 
 If you'd rather build the scenes by hand, here's the source layout per scene. Position and Bounds use the OBS "Stretch to bounding box" mode.
 
@@ -233,7 +269,7 @@ For the now-playing source: `http://localhost:7779/scenes/09-now-playing.html?de
 
 ---
 
-## 7 — Customising
+## 8 — Customising
 
 ### Colours, fonts, ticker copy, scene styling
 

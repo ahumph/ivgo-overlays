@@ -798,8 +798,8 @@ function script_properties()
         "URL of the SMTC watch script's HTTP server. Default http://localhost:7779 — leave blank to skip the now-playing overlay entirely. Run tools/now-playing-watch.ps1 before streaming so this resolves.",
         obs.OBS_TEXT_INFO)
 
-    obs.obs_properties_add_text(props, "arr_piece",         "Arranging: piece",         obs.OBS_TEXT_DEFAULT)
-    obs.obs_properties_add_text(props, "arr_collection",    "Arranging: collection",    obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_text(props, "arr_piece",         "Arranging: Piece (boot default only — change with !piece in chat)",      obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_text(props, "arr_collection",    "Arranging: Game (boot default only — change with !from in chat)",       obs.OBS_TEXT_DEFAULT)
     obs.obs_properties_add_int (props, "arr_sprints_total", "Arranging: total sprints", 1, 12, 1)
     obs.obs_properties_add_int (props, "arr_focus_mins",    "Arranging: focus mins",    1, 90, 1)
     obs.obs_properties_add_int (props, "arr_break_mins",    "Arranging: break mins",    1, 60, 1)
