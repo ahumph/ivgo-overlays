@@ -35,6 +35,7 @@ function Await($op, $resultType) {
 
 $priorities = @{
     'TIDAL.exe'         = 1
+    'Spotify.exe'       = 1
     'chrome.exe'        = 2
     'msedge.exe'        = 2
     'firefox.exe'       = 2
