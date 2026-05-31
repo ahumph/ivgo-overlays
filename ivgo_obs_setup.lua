@@ -728,6 +728,47 @@ local function build_all()
     print("[IVGO] Done — 7 scenes created / refreshed.")
 end
 
+-- ── Now-Playing watcher auto-start ────────────────────────────────────────────
+-- Spawns tools/now-playing-watch.ps1 detached on script load so the
+-- localhost:7779 HTTP server is up before any browser source resolves the
+-- Now Playing URL. The PowerShell wrapper TCP-probes port 7779 first and
+-- short-circuits if something is already listening (re-running this script,
+-- a manual launch, or a leftover process from a previous OBS session).
+
+local function start_now_playing_watcher()
+    local script_dir = script_path()  -- includes trailing slash on Windows
+    local ps1 = script_dir .. "tools\\now-playing-watch.ps1"
+    -- Single-line PowerShell: try-connect to 127.0.0.1:7779, only Start-Process
+    -- the watcher if the connect fails (i.e. nobody is listening).
+    -- `start /B ""` detaches from the OBS process so it survives OBS exit only
+    -- as long as the spawned watcher itself stays alive — Start-Process gives
+    -- the watcher its own process group, so closing OBS does NOT kill it.
+    local cmd = string.format(
+        'start /B "" powershell.exe -NoProfile -WindowStyle Hidden -Command ' ..
+        '"try { $c=New-Object Net.Sockets.TcpClient; $c.Connect(\'127.0.0.1\',7779); $c.Close() } ' ..
+        'catch { Start-Process powershell.exe -WindowStyle Hidden -ArgumentList ' ..
+        '\'-NoProfile\',\'-ExecutionPolicy\',\'Bypass\',\'-WindowStyle\',\'Hidden\',\'-File\',\'%s\' }"',
+        ps1
+    )
+    print("[IVGO] Ensuring Now Playing watcher is running: " .. ps1)
+    os.execute(cmd)
+end
+
+local function maybe_start_now_playing_watcher()
+    if not settings_ref then return end
+    if not obs.obs_data_get_bool(settings_ref, "auto_start_np") then
+        print("[IVGO] Now Playing auto-start disabled — skipping watcher launch.")
+        return
+    end
+    -- Empty np_base = user explicitly disabled the overlay; don't spawn.
+    local np_base = obs.obs_data_get_string(settings_ref, "now_playing_http_base")
+    if np_base == nil or np_base == "" then
+        print("[IVGO] Now-Playing HTTP base is blank — skipping watcher launch.")
+        return
+    end
+    start_now_playing_watcher()
+end
+
 -- ── OBS script hooks ──────────────────────────────────────────────────────────
 
 function script_description()
@@ -742,6 +783,7 @@ end
 
 function script_load(settings)
     settings_ref = settings
+    maybe_start_now_playing_watcher()
 end
 
 function script_defaults(settings)
@@ -753,6 +795,7 @@ function script_defaults(settings)
     obs.obs_data_set_default_int   (settings, "countdown_mins", 5)
     obs.obs_data_set_default_string(settings, "socket_url", "wss://ivgorchestra.fly.dev/overlay")
     obs.obs_data_set_default_string(settings, "now_playing_http_base", "http://localhost:7779")
+    obs.obs_data_set_default_bool  (settings, "auto_start_np", true)
 
     obs.obs_data_set_default_string(settings, "arr_piece",         "AERITH'S SUITE")
     obs.obs_data_set_default_string(settings, "arr_collection",    "FINAL FANTASY VII REBIRTH")
@@ -795,8 +838,14 @@ function script_properties()
 
     obs.obs_properties_add_text(props, "now_playing_http_base", "Now-Playing HTTP base", obs.OBS_TEXT_DEFAULT)
     obs.obs_properties_add_text(props, "_now_playing_hint",
-        "URL of the SMTC watch script's HTTP server. Default http://localhost:7779 — leave blank to skip the now-playing overlay entirely. Run tools/now-playing-watch.ps1 before streaming so this resolves.",
+        "URL of the SMTC watch script's HTTP server. Default http://localhost:7779 — leave blank to skip the now-playing overlay entirely.",
         obs.OBS_TEXT_INFO)
+    obs.obs_properties_add_bool(props, "auto_start_np", "Auto-start Now Playing watcher with OBS")
+    obs.obs_properties_add_text(props, "_auto_start_np_hint",
+        "When enabled, launches tools/now-playing-watch.ps1 hidden in the background each time this script loads — but only if port 7779 isn't already taken. No more manual powershell.exe + browser-source refresh.",
+        obs.OBS_TEXT_INFO)
+    obs.obs_properties_add_button(props, "btn_start_np", "Start Now Playing watcher now",
+        function(_, _) start_now_playing_watcher(); return true end)
 
     obs.obs_properties_add_text(props, "arr_piece",         "Arranging: Piece (boot default only — change with !piece in chat)",      obs.OBS_TEXT_DEFAULT)
     obs.obs_properties_add_text(props, "arr_collection",    "Arranging: Game (boot default only — change with !from in chat)",       obs.OBS_TEXT_DEFAULT)

@@ -195,6 +195,20 @@
     const hasTrackRef = React.useRef(false);
     React.useEffect(() => { hasTrackRef.current = !!(state && state.title); }, [state]);
 
+    // Auto-reveal when the track changes. First non-empty track after load
+    // seeds the ref without firing (avoids a pop on every browser-source
+    // refresh); subsequent changes slide the panel in.
+    const lastTrackKeyRef = React.useRef(null);
+    React.useEffect(() => {
+      const key = state && state.title ? (state.title + '|' + (state.artist || '')) : null;
+      if (!key) return;
+      if (lastTrackKeyRef.current === null) { lastTrackKeyRef.current = key; return; }
+      if (key !== lastTrackKeyRef.current) {
+        lastTrackKeyRef.current = key;
+        reveal();
+      }
+    }, [state, reveal]);
+
     // SMTC state poll (every 2s).
     React.useEffect(() => {
       let cancelled = false;

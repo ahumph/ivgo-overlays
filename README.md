@@ -118,7 +118,13 @@ The BRB scene loads `media/about.mkv` directly via its HTML.
 
 The Now Playing overlay reads from Windows SMTC, so it works automatically with Tidal, YouTube (Chrome/Edge/Firefox), Spotify, and most music apps.
 
-### One-time setup
+### Auto-start (default)
+
+The OBS installer script launches the SMTC watcher (`tools/now-playing-watch.ps1`) hidden in the background each time OBS loads — controlled by the **Auto-start Now Playing watcher with OBS** checkbox in the Scripts panel. It TCP-probes port 7779 first, so re-loading the script or having a leftover watcher from a previous session is a no-op. Nothing else to do — just open OBS.
+
+Toggle the checkbox off if you'd rather run the watcher yourself (e.g. you're driving it from a Task Scheduler entry instead). The **Start Now Playing watcher now** button next to it forces a launch on demand.
+
+### Manual run (if auto-start is off)
 
 In a PowerShell window (**use `powershell.exe`, not `pwsh.exe`** — PS7 lacks the WinRT API needed):
 
@@ -126,7 +132,7 @@ In a PowerShell window (**use `powershell.exe`, not `pwsh.exe`** — PS7 lacks t
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\now-playing-watch.ps1
 ```
 
-Leave the window running (minimised is fine). It prints each track change so you can confirm it's working. To start it automatically at login, see `tools/README.md` for the Task Scheduler recipe.
+Leave the window running (minimised is fine). It prints each track change so you can confirm it's working.
 
 ### How it appears on stream
 
