@@ -733,7 +733,7 @@ function ChatPanel({channel = 'irishvideogameorchestra', style={}}) {
         const msgMatch = line.match(/PRIVMSG #\S+ :(.+)$/);
         if (!msgMatch) return;
         const name = tags['display-name'] || 'viewer';
-        setMessages(prev => [...prev.slice(-5), {
+        setMessages(prev => [...prev.slice(-29), {
           id: tags['id'] || Math.random().toString(36),
           u: name,
           c: tags['color'] || _chatColor(name),
@@ -759,15 +759,16 @@ function ChatPanel({channel = 'irishvideogameorchestra', style={}}) {
       )
     ),
     React.createElement('div', {style:{height:1,background:T.rule}}),
-    React.createElement('div', {style:{display:'flex',flexDirection:'column',gap:8}},
+    React.createElement('div', {style:{flex:1,display:'flex',flexDirection:'column',justifyContent:'flex-end',gap:8,overflow:'hidden',minHeight:0}},
       messages.length === 0
         ? React.createElement('div', {style:{fontFamily:T.mono,fontSize:10,letterSpacing:'.18em',color:T.ink3}}, 'WAITING FOR CHAT\u2026')
         : messages.map((m, i) => React.createElement('div', {key:m.id, style:{
-            display:'flex', gap:8, fontSize:13, lineHeight:1.35,
+            fontSize:13, lineHeight:1.35, wordBreak:'break-word',
+            fontFamily:T.mono, letterSpacing:'.04em', color:T.ink,
             opacity: 0.5 + (i / Math.max(messages.length - 1, 1)) * 0.5,
           }},
-            React.createElement('span', {style:{color:m.c,fontWeight:600,fontFamily:T.mono,fontSize:11,letterSpacing:'.06em',flexShrink:0}}, m.u),
-            React.createElement('span', {style:{color:T.ink,wordBreak:'break-word',fontFamily:T.mono,fontSize:11,letterSpacing:'.04em'}}, m.t)
+            React.createElement('span', {style:{color:m.c,fontWeight:600,fontSize:11,letterSpacing:'.06em',marginRight:8}}, m.u),
+            m.t
           ))
     )
   );
