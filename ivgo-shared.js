@@ -6,8 +6,6 @@
 
 // Upcoming concerts — edit this list to update all scenes at once.
 const EVENTS = [
-  'START QUEST · MAC BELFAST · 06.06.2026',
-  'PRESS PLAY · MAC BELFAST · 06.06.2026',
   'THE ADVENTURE CONTINUES · HELIX DUBLIN · 01.08.2026',
 ];
 
@@ -478,6 +476,254 @@ const _videoEgg = (function () {
   };
 })();
 
+// ── RaidBackdrop ──────────────────────────────────────────────────────────
+// Fullscreen WeeMan video that plays underneath the existing raid alerts
+// (toast + raid.mp4 egg) when a channel.raid arrives. Sits below the egg
+// (z-index 9) and HeaderBar (5) so the alert UI stays on top, but above
+// the scene background. Plays with audio.
+const _raidBackdrop = (function () {
+  const SRC = '../media/WeeManRaid.mp4';
+  const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : null;
+  const DISABLED = params && params.get('raid_bg_off') === '1';
+
+  let videoEl = null;
+
+  function ensureFilter() {
+    if (document.getElementById('ivgo-black-key-svg')) return;
+    const svg = document.createElement('div');
+    svg.id = 'ivgo-black-key-svg';
+    svg.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden';
+    // Luma-key: alpha = R+G+B (clamped). Pure black → 0 alpha.
+    // feComponentTransfer sharpens the key so dark-but-not-black pixels
+    // (compression noise) also drop out.
+    svg.innerHTML = ''
+      + '<svg xmlns="http://www.w3.org/2000/svg">'
+      +   '<filter id="ivgo-black-key" color-interpolation-filters="sRGB">'
+      +     '<feColorMatrix type="matrix" values="'
+      +       '1 0 0 0 0 '
+      +       '0 1 0 0 0 '
+      +       '0 0 1 0 0 '
+      +       '1 1 1 0 0"/>'
+      +     '<feComponentTransfer>'
+      +       '<feFuncA type="linear" slope="3" intercept="-0.3"/>'
+      +     '</feComponentTransfer>'
+      +   '</filter>'
+      + '</svg>';
+    document.body.appendChild(svg);
+  }
+
+  function ensureMounted() {
+    if (videoEl) return;
+    ensureFilter();
+    videoEl = document.createElement('video');
+    videoEl.src = SRC;
+    videoEl.preload = 'auto';
+    videoEl.playsInline = true;
+    videoEl.style.cssText = [
+      'position:fixed',
+      'inset:0',
+      'width:100vw',
+      'height:100vh',
+      'object-fit:cover',
+      'opacity:0',
+      'pointer-events:none',
+      'transition:opacity 250ms ease',
+      'z-index:4',
+      'filter:url(#ivgo-black-key)',
+      '-webkit-filter:url(#ivgo-black-key)',
+    ].join(';');
+    videoEl.addEventListener('ended', hide);
+    videoEl.addEventListener('error', e => {
+      console.warn('[IVGO raidBackdrop] video error', e);
+      hide();
+    });
+    document.body.appendChild(videoEl);
+  }
+
+  function hide() {
+    if (videoEl) videoEl.style.opacity = '0';
+  }
+
+  function play() {
+    if (DISABLED) return;
+    ensureMounted();
+    videoEl.style.opacity = '1';
+    videoEl.currentTime = 0;
+    videoEl.play().catch(err => {
+      // Autoplay with sound may be blocked; retry muted as fallback.
+      console.warn('[IVGO raidBackdrop] play() rejected, retrying muted:', err);
+      videoEl.muted = true;
+      videoEl.play().catch(err2 => {
+        console.warn('[IVGO raidBackdrop] muted play() also rejected:', err2);
+        hide();
+      });
+    });
+  }
+
+  return { play: play };
+})();
+
+// ── MicMuteIndicator ──────────────────────────────────────────────────────
+// Top-left icon reflecting OBS "Mic/Aux" mute state via obs-websocket v5.
+// Persistent mute.png while muted; on unmute, briefly shows microphone.png
+// then fades out. Connects to ws://localhost:4455 with no auth (the Lua
+// installer enables that by default for non-technical users). Override host
+// or password via URL params: ?obsws=ws://host:port  ?obsws_pw=secret
+// Disable per-scene with ?mic_off=1.
+const _micMute = (function () {
+  const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : null;
+  const DISABLED  = params && params.get('mic_off') === '1';
+  const WS_URL    = (params && params.get('obsws'))    || 'ws://localhost:4455';
+  const PASSWORD  = (params && params.get('obsws_pw')) || '';
+  const INPUT_NAME = (params && params.get('mic_input')) || 'Mic/Aux';
+  const UNMUTE_VISIBLE_MS = 2000;
+  const RECONNECT_MS = 5000;
+
+  let containerEl = null;
+  let imgEl = null;
+  let fadeTimer = null;
+  let ws = null;
+  let reconnectTimer = null;
+
+  function ensureMounted() {
+    if (containerEl) return;
+    containerEl = document.createElement('div');
+    containerEl.style.cssText = [
+      'position:fixed',
+      'top:64px',
+      'left:10px',
+      'width:48px',
+      'height:48px',
+      'opacity:0',
+      'pointer-events:none',
+      'transition:opacity 600ms ease',
+      'z-index:1000',
+    ].join(';');
+    imgEl = document.createElement('img');
+    imgEl.style.cssText = 'width:100%;height:100%;display:block;object-fit:contain';
+    imgEl.alt = '';
+    containerEl.appendChild(imgEl);
+    document.body.appendChild(containerEl);
+  }
+
+  function showMuted() {
+    ensureMounted();
+    if (fadeTimer) { clearTimeout(fadeTimer); fadeTimer = null; }
+    imgEl.src = '../media/mute.png';
+    containerEl.style.transition = 'opacity 200ms ease';
+    containerEl.style.opacity = '1';
+  }
+
+  function showUnmutedThenFade() {
+    ensureMounted();
+    if (fadeTimer) { clearTimeout(fadeTimer); fadeTimer = null; }
+    imgEl.src = '../media/microphone.png';
+    containerEl.style.transition = 'opacity 200ms ease';
+    containerEl.style.opacity = '1';
+    fadeTimer = setTimeout(() => {
+      containerEl.style.transition = 'opacity 1200ms ease';
+      containerEl.style.opacity = '0';
+      fadeTimer = null;
+    }, UNMUTE_VISIBLE_MS);
+  }
+
+  // Tracks previous mute state so the initial GetInputMute response after
+  // (re)connect doesn't fire the "just unmuted, fade in/out" animation if we
+  // were already unmuted. null = unknown.
+  let lastMuted = null;
+  function applyMuteState(muted) {
+    if (muted) {
+      showMuted();
+    } else if (lastMuted === true) {
+      showUnmutedThenFade();
+    } else {
+      // First read on connect and already unmuted: stay hidden.
+      if (containerEl) containerEl.style.opacity = '0';
+    }
+    lastMuted = muted;
+  }
+
+  function send(op, d) {
+    if (!ws || ws.readyState !== 1) return;
+    ws.send(JSON.stringify({ op: op, d: d }));
+  }
+
+  function requestInitialState() {
+    // obs-websocket v5 Request op = 6; GetInputMute returns { inputMuted: bool }
+    send(6, {
+      requestType: 'GetInputMute',
+      requestId: 'ivgo-init-mute',
+      requestData: { inputName: INPUT_NAME },
+    });
+  }
+
+  async function onMessage(ev) {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch (e) { return; }
+    const op = msg.op, d = msg.d;
+    if (op === 0) {
+      // Hello → respond with Identify.
+      // eventSubscriptions=8 → "Inputs" category only (covers InputMuteStateChanged).
+      const identify = { rpcVersion: 1, eventSubscriptions: 8 };
+      if (d.authentication && PASSWORD) {
+        // Authentication: base64(sha256(base64(sha256(password + salt)) + challenge))
+        identify.authentication = await computeAuth(PASSWORD, d.authentication.salt, d.authentication.challenge);
+      }
+      send(1, identify);
+    } else if (op === 2) {
+      // Identified → query current mute state.
+      requestInitialState();
+    } else if (op === 5) {
+      // Event
+      if (d.eventType === 'InputMuteStateChanged' && d.eventData && d.eventData.inputName === INPUT_NAME) {
+        applyMuteState(!!d.eventData.inputMuted);
+      }
+    } else if (op === 7) {
+      // RequestResponse
+      if (d.requestId === 'ivgo-init-mute' && d.responseData) {
+        applyMuteState(!!d.responseData.inputMuted);
+      }
+    }
+  }
+
+  async function computeAuth(password, salt, challenge) {
+    const enc = new TextEncoder();
+    async function sha256b64(str) {
+      const buf = await crypto.subtle.digest('SHA-256', enc.encode(str));
+      let bin = '';
+      const bytes = new Uint8Array(buf);
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      return btoa(bin);
+    }
+    const secret = await sha256b64(password + salt);
+    return await sha256b64(secret + challenge);
+  }
+
+  function connect() {
+    if (DISABLED) return;
+    try {
+      ws = new WebSocket(WS_URL);
+    } catch (e) {
+      scheduleReconnect();
+      return;
+    }
+    ws.addEventListener('message', onMessage);
+    ws.addEventListener('close', scheduleReconnect);
+    ws.addEventListener('error', () => { try { ws.close(); } catch (_) {} });
+  }
+
+  function scheduleReconnect() {
+    if (DISABLED) return;
+    if (reconnectTimer) return;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      connect();
+    }, RECONNECT_MS);
+  }
+
+  return { start: connect };
+})();
+
 // Auto-wire Twitch events to toasts and video easter egg
 if (typeof document !== 'undefined') {
   document.addEventListener('DOMContentLoaded', function () {
@@ -491,6 +737,9 @@ if (typeof document !== 'undefined') {
     _bus.on('channel.subscribe',         () => _videoEgg.alrighty());
     _bus.on('channel.subscription.gift', () => _videoEgg.alrighty());
     _bus.on('channel.raid',              () => _videoEgg.raid());
+    _bus.on('channel.raid',              () => _raidBackdrop.play());
+
+    _micMute.start();
   });
 }
 

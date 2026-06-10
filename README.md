@@ -18,10 +18,12 @@ designed to work together in OBS.
 | 06 | Ending | Outro screen with full-bleed video |
 | 07 | Arranging | Music-arranging coworking layout: display capture, host cam, Pianoteq keyboard band, task list, pomodoro timer, sliding info panel |
 
-Two extras layered on every scene:
+Extras layered on every scene:
 
 - **Now Playing** — a slide-out strip showing what's playing on Tidal / YouTube. Hidden by default; viewers reveal it with `!np` or `!playing` in chat.
 - **Fire Overlay** — triggered by the `!fine` chat command (costs 100 Ostis); plays a fire effect over whatever scene you're on.
+- **Raid alerts** — a Twitch raid pops the usual toast + `media/raid.mp4` egg *and* fades in a fullscreen `media/WeeManRaid.mp4` backdrop behind them (black-keyed via an SVG luma filter, with audio).
+- **Mic mute indicator** — a small icon at the top-left (`media/mute.png` while the OBS *Mic/Aux* input is muted; `media/microphone.png` flashes for ~2s then fades out on unmute). Reads OBS state over obs-websocket.
 
 ---
 
@@ -47,6 +49,8 @@ This creates all the scenes and their sources automatically. Re-run it any time 
 4. The script appears in the list. Click it once — its settings appear on the right.
 
 > Lua scripting is built into OBS. No extra install needed.
+
+> **First-time only:** the script writes a default obs-websocket config (port 4455, no auth) so the mic-mute indicator can read OBS state. If you're a fresh OBS install, **restart OBS once** after loading the script for that to activate. If you already have obs-websocket configured (with or without a password), the script leaves your config alone — pass `?obsws_pw=yourpassword` on the overlay browser-source URL if you've set one.
 
 ---
 
@@ -319,6 +323,9 @@ The crop values in the installer (`top=825, bottom=2, left=35, right=41`) assume
 **Fire overlay shows but black background isn't transparent.**
 You're using `fire.webm` instead of `fire-alpha.webm`. The alpha-channel version is what the overlay loads by default — confirm `scenes/10-fire.html` references `fire-alpha.webm`.
 
+**Mic mute icon never appears (or never disappears).**
+Check obs-websocket is enabled: OBS → **Tools** → **WebSocket Server Settings** → Server Enabled, port 4455. If you've set a password, append `?obsws_pw=yourpassword` to the overlay browser-source URL. If your mic input isn't called *Mic/Aux*, override with `?mic_input=Your Input Name`. Disable per-source with `?mic_off=1`.
+
 **Animations stutter.**
 Right-click the offending browser source → Properties → **FPS** → 60.
 
@@ -346,6 +353,10 @@ ivgo-overlays/
 │   ├── buts.mkv                    # Starting Soon background
 │   ├── tetris.webm                 # Ending background
 │   ├── gifs/                       # arranging info-panel GIFs (see README inside)
+│   ├── raid.mp4                    # raid alert egg clip
+│   ├── WeeManRaid.mp4              # fullscreen raid backdrop (black-keyed)
+│   ├── microphone.png              # mic-unmuted indicator (briefly shown then faded)
+│   ├── mute.png                    # mic-muted indicator (persistent while muted)
 │   └── overlay/
 │       └── fire-alpha.webm         # !fine fire effect (VP9 alpha + Opus audio)
 ├── scenes/

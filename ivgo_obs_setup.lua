@@ -781,8 +781,105 @@ Game, Camera, Two-Cam, and Arranging scenes to point them at your webcam,
 game window, and notation-software display.]]
 end
 
+-- ── obs-websocket auto-enable ────────────────────────────────────────────────
+-- The Mic/Aux mute indicator in the overlay connects to OBS via obs-websocket
+-- (built into OBS 28+). For non-technical users we write a sane default config
+-- (port 4455, no auth) on first launch if the user hasn't already configured
+-- one. If a config already exists with the server enabled, we leave it alone
+-- so we don't clobber a password they set deliberately.
+
+local function obs_ws_config_path()
+    local sep = is_windows() and "\\" or "/"
+    local base
+    if is_windows() then
+        base = os.getenv("APPDATA")
+        if not base then return nil end
+        return base .. "\\obs-studio\\plugin_config\\obs-websocket\\config.json"
+    elseif package.config:sub(1,1) == "/" then
+        local home = os.getenv("HOME")
+        if not home then return nil end
+        -- macOS uses ~/Library/Application Support; Linux uses ~/.config.
+        -- Probe for the macOS path first; if its parent OBS dir doesn't exist
+        -- fall back to the Linux path.
+        local mac = home .. "/Library/Application Support/obs-studio/plugin_config/obs-websocket/config.json"
+        local mac_obs_dir = home .. "/Library/Application Support/obs-studio"
+        local f = io.open(mac_obs_dir, "r")
+        if f then f:close(); return mac end
+        return home .. "/.config/obs-studio/plugin_config/obs-websocket/config.json"
+    end
+    return nil
+end
+
+local function ensure_dir(path)
+    -- Create parent directories as needed. Path is the FILE path, not the dir.
+    local dir = path:match("(.*)[/\\][^/\\]+$")
+    if not dir then return end
+    if is_windows() then
+        os.execute(string.format('if not exist "%s" mkdir "%s"', dir, dir))
+    else
+        os.execute(string.format('mkdir -p "%s"', dir))
+    end
+end
+
+local function read_file(path)
+    local f = io.open(path, "r")
+    if not f then return nil end
+    local s = f:read("*a")
+    f:close()
+    return s
+end
+
+local function write_file(path, contents)
+    local f = io.open(path, "w")
+    if not f then return false end
+    f:write(contents)
+    f:close()
+    return true
+end
+
+local function ensure_obs_websocket_enabled()
+    local path = obs_ws_config_path()
+    if not path then
+        print("[IVGO] obs-websocket: could not resolve config path for this OS — skipping auto-enable.")
+        return
+    end
+    local existing = read_file(path)
+    if existing then
+        -- Cheap "is the server already enabled?" probe. We avoid pulling in a
+        -- full JSON parser; obs-websocket writes a stable key order so a
+        -- substring check is good enough for the common case.
+        if existing:find('"server_enabled"%s*:%s*true') then
+            print("[IVGO] obs-websocket already enabled — leaving config alone.")
+            return
+        end
+        -- Server present but disabled: don't overwrite (user may have a
+        -- password set). Tell them what to do instead.
+        print("[IVGO] obs-websocket is installed but disabled. Enable it via OBS → Tools → WebSocket Server Settings, set port 4455 and clear the password (or set one and put it in the URL — see README).")
+        return
+    end
+
+    -- No config at all → write defaults.
+    ensure_dir(path)
+    local default_json = table.concat({
+        '{',
+        '    "alerts_enabled": false,',
+        '    "auth_required": false,',
+        '    "first_load": false,',
+        '    "server_enabled": true,',
+        '    "server_password": "",',
+        '    "server_port": 4455',
+        '}'
+    }, "\n")
+    if write_file(path, default_json) then
+        print("[IVGO] obs-websocket: wrote default config (port 4455, no auth) to " .. path .. " — RESTART OBS ONCE to activate.")
+    else
+        print("[IVGO] obs-websocket: failed to write config to " .. path)
+    end
+end
+
 function script_load(settings)
     settings_ref = settings
+    ensure_obs_websocket_enabled()
     maybe_start_now_playing_watcher()
 end
 
