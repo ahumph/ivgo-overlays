@@ -48,6 +48,7 @@ const T = {
   mono:      'ui-monospace, "JetBrains Mono", "IBM Plex Mono", Menlo, Consolas, monospace',
   sans:      '"Inter", "Helvetica Neue", Helvetica, Arial, sans-serif',
   display:   '"Archivo", "Helvetica Neue", Helvetica, Arial, sans-serif',
+  chatFont:  15,
 };
 
 // ── EventBus ──────────────────────────────────────────────────────────────
@@ -1012,11 +1013,11 @@ function ChatPanel({channel = 'irishvideogameorchestra', style={}}) {
       messages.length === 0
         ? React.createElement('div', {style:{fontFamily:T.mono,fontSize:10,letterSpacing:'.18em',color:T.ink3}}, 'WAITING FOR CHAT\u2026')
         : messages.map((m, i) => React.createElement('div', {key:m.id, style:{
-            fontSize:13, lineHeight:1.35, wordBreak:'break-word',
+            fontSize:T.chatFont, lineHeight:1.35, wordBreak:'break-word',
             fontFamily:T.mono, letterSpacing:'.04em', color:T.ink,
             opacity: 0.5 + (i / Math.max(messages.length - 1, 1)) * 0.5,
           }},
-            React.createElement('span', {style:{color:m.c,fontWeight:600,fontSize:11,letterSpacing:'.06em',marginRight:8}}, m.u),
+            React.createElement('span', {style:{color:m.c,fontWeight:600,fontSize:T.chatFont - 2,letterSpacing:'.06em',marginRight:8}}, m.u),
             m.t
           ))
     )
