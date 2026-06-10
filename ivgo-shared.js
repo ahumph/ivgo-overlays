@@ -572,7 +572,11 @@ const _raidBackdrop = (function () {
 // Disable per-scene with ?mic_off=1.
 const _micMute = (function () {
   const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : null;
-  const DISABLED  = params && params.get('mic_off') === '1';
+  // Opt-in: only the primary chrome overlay per scene should mount this, so
+  // composite scenes (which stack multiple browser sources, each loading
+  // ivgo-shared.js) don't render duplicate icons. Set `?mic=1` on the URL of
+  // the one source per scene that should show the indicator.
+  const ENABLED   = params && params.get('mic') === '1';
   const WS_URL    = (params && params.get('obsws'))    || 'ws://localhost:4455';
   const PASSWORD  = (params && params.get('obsws_pw')) || '';
   const INPUT_NAME = (params && params.get('mic_input')) || 'Mic/Aux';
@@ -700,7 +704,7 @@ const _micMute = (function () {
   }
 
   function connect() {
-    if (DISABLED) return;
+    if (!ENABLED) return;
     try {
       ws = new WebSocket(WS_URL);
     } catch (e) {
@@ -713,7 +717,7 @@ const _micMute = (function () {
   }
 
   function scheduleReconnect() {
-    if (DISABLED) return;
+    if (!ENABLED) return;
     if (reconnectTimer) return;
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
