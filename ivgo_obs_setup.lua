@@ -385,9 +385,82 @@ end
 -- connection, one configuration. Listens for the `overlay.fire` event on
 -- overlay:events; payload from ivgo-ex once the !fine command lands a
 -- successful Ostis deduction.
+--
+-- toasts=0 / egg_off=1 / raid_bg_off=1 are required, not cosmetic: the
+-- auto-wire block in ivgo-shared.js mounts toasts, the alrighty/raid egg and
+-- the WeeMan raid backdrop on *every* page that connects to the bus. Without
+-- these, a raid plays WeeManRaid.mp4 twice with doubled audio — once from the
+-- scene's chrome overlay and once from here.
 local function build_fire(scene, base, socket_url)
-    local src = make_browser("IVGO: Fire Overlay", append_socket_url(base .. "/10-fire.html", socket_url))
+    local url = base .. "/10-fire.html?toasts=0&egg_off=1&raid_bg_off=1"
+    local src = make_browser("IVGO: Fire Overlay", append_socket_url(url, socket_url))
     if src then
+        place(scene, src, 0, 0, 1920, 1080)
+        obs.obs_source_release(src)
+    end
+end
+
+-- Clip player (chat clip links + mod shoutouts): a single "IVGO: Clip Player"
+-- browser source layered just under the fire overlay on every main scene.
+-- Reads chat over its own anonymous IRC socket and plays a centered panel.
+-- Viewer links only play IVGO's own clips; `!so <user>` from a mod plays that
+-- streamer's featured clip. Raid alerts interrupt it. Disable per-scene with
+-- clip_off=1, or repo-wide via the "Clip player" checkbox in script settings.
+--
+-- Reads its two settings off settings_ref directly rather than taking them as
+-- arguments, so the call site in each scene builder stays a one-liner like
+-- build_fire's.
+-- Browser sources don't put their audio in the mixer by default — it goes out
+-- through the OBS process, so a clip is silent on stream unless you happen to
+-- capture desktop audio. `reroute_audio` makes the source its own mixer
+-- channel, and MONITOR_AND_OUTPUT sends it to both the stream and your
+-- headphones. This is the "enable audio + monitor it" pair you'd otherwise set
+-- by hand on every fresh install.
+--
+-- The two false flags matter because this source is stateful in a way the
+-- other overlays aren't: it holds an IRC connection plus the cooldown and
+-- already-played bookkeeping. Letting OBS shut it down when hidden, or refresh
+-- it on scene activation, would drop a playing clip and wipe every cooldown —
+-- so a clip could be spammed again right after a scene change.
+--
+-- Re-applied to existing sources on every rebuild, since make_browser's update
+-- path only touches the URL.
+local function configure_clip_source(src)
+    local d = obs.obs_source_get_settings(src)
+    obs.obs_data_set_bool(d, "reroute_audio",       true)
+    obs.obs_data_set_bool(d, "shutdown",            false)
+    obs.obs_data_set_bool(d, "restart_when_active", false)
+    obs.obs_source_update(src, d)
+    obs.obs_data_release(d)
+    obs.obs_source_set_monitoring_type(src, obs.OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT)
+
+    -- Force a fresh page load on every rebuild. OBS only reloads a browser
+    -- source when its URL changes, and this source deliberately has
+    -- restart_when_active off — so an edit to 11-clip.html that doesn't also
+    -- change a URL param would otherwise keep serving the cached old page
+    -- indefinitely, and "Create / Refresh Scenes" would appear to do nothing.
+    local ph = obs.obs_source_get_proc_handler(src)
+    local cd = obs.calldata_create()
+    obs.proc_handler_call(ph, "refreshnocache", cd)
+    obs.calldata_destroy(cd)
+end
+
+local function build_clip(scene, base, socket_url)
+    if not settings_ref then return end
+    if not obs.obs_data_get_bool(settings_ref, "clip_player") then return end
+
+    local channel = obs.obs_data_get_string(settings_ref, "twitch_channel")
+    local size    = obs.obs_data_get_string(settings_ref, "clip_size")
+    local url = base .. "/11-clip.html?toasts=0&egg_off=1&raid_bg_off=1"
+    if channel and channel ~= "" then
+        url = url .. "&channel=" .. string.lower(channel)
+    end
+    if size and size ~= "" then
+        url = url .. "&clip_size=" .. size
+    end
+    local src = make_browser("IVGO: Clip Player", append_socket_url(url, socket_url))
+    if src then
+        configure_clip_source(src)
         place(scene, src, 0, 0, 1920, 1080)
         obs.obs_source_release(src)
     end
@@ -430,6 +503,7 @@ local function build_starting_soon(base, countdown_mins, socket_url, np_base)
         obs.obs_source_release(src)
     end
     build_now_playing(scene, np_base)
+    build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
@@ -478,6 +552,7 @@ local function build_game(base, socket_url, np_base)
     -- 02 Game's cam PiP sits top-right where the !PLAYING label normally
     -- lives — shift the now-playing source down 110px so the label clears it.
     build_now_playing(scene, np_base, 110)
+    build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
@@ -504,6 +579,7 @@ local function build_camera(base, host, host_role, socket_url, np_base)
     end
 
     build_now_playing(scene, np_base)
+    build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
@@ -517,6 +593,7 @@ local function build_brb(base, socket_url, np_base)
         obs.obs_source_release(src)
     end
     build_now_playing(scene, np_base)
+    build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
@@ -555,6 +632,7 @@ local function build_two_cam(base, host, host_role, guest, g_role, topic, socket
     end
 
     build_now_playing(scene, np_base)
+    build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
@@ -577,6 +655,7 @@ local function build_ending(base, socket_url, np_base)
         obs.obs_source_release(src)
     end
     build_now_playing(scene, np_base)
+    build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
@@ -696,6 +775,7 @@ local function build_arranging(base, piece, collection, sprints_total, focus_min
     end
 
     build_now_playing(scene, np_base)
+    build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
@@ -879,10 +959,53 @@ local function ensure_obs_websocket_enabled()
     end
 end
 
+-- ── Stop-clip hotkey ──────────────────────────────────────────────────────
+-- Panic button for a clip you want off screen *now* without typing !clipstop
+-- in chat — which is awkward mid-game. Reloads the Clip Player page, which
+-- kills playback and audio instantly.
+--
+-- The blunt instrument is deliberate: OBS Lua has no clean channel into a
+-- running browser source, and a reload needs no extra plumbing. The cost is
+-- that per-viewer cooldowns and the already-played list reset, so the clip
+-- that just got pulled could be re-posted immediately. `!clipstop` is the
+-- better everyday lever; this is the one you hit when chat isn't an option.
+--
+-- No key is bound by default — set one in OBS → Settings → Hotkeys, under
+-- "IVGO: Stop clip player".
+local stop_clip_hotkey_id = obs.OBS_INVALID_HOTKEY_ID
+
+local function stop_clip_now()
+    local src = obs.obs_get_source_by_name("IVGO: Clip Player")
+    if not src then
+        print("[IVGO] Stop clip: no 'IVGO: Clip Player' source found.")
+        return
+    end
+    local ph = obs.obs_source_get_proc_handler(src)
+    local cd = obs.calldata_create()
+    obs.proc_handler_call(ph, "refreshnocache", cd)
+    obs.calldata_destroy(cd)
+    obs.obs_source_release(src)
+    print("[IVGO] Stop clip: Clip Player reloaded.")
+end
+
 function script_load(settings)
     settings_ref = settings
     ensure_obs_websocket_enabled()
     maybe_start_now_playing_watcher()
+
+    stop_clip_hotkey_id = obs.obs_hotkey_register_frontend(
+        "ivgo_stop_clip", "IVGO: Stop clip player",
+        function(pressed) if pressed then stop_clip_now() end end)
+    local hk = obs.obs_data_get_array(settings, "ivgo_stop_clip_hotkey")
+    obs.obs_hotkey_load(stop_clip_hotkey_id, hk)
+    obs.obs_data_array_release(hk)
+end
+
+-- Persist the user's chosen key across OBS restarts.
+function script_save(settings)
+    local hk = obs.obs_hotkey_save(stop_clip_hotkey_id)
+    obs.obs_data_set_array(settings, "ivgo_stop_clip_hotkey", hk)
+    obs.obs_data_array_release(hk)
 end
 
 function script_defaults(settings)
@@ -895,6 +1018,9 @@ function script_defaults(settings)
     obs.obs_data_set_default_string(settings, "socket_url", "wss://ivgorchestra.fly.dev/overlay")
     obs.obs_data_set_default_string(settings, "now_playing_http_base", "http://localhost:7779")
     obs.obs_data_set_default_bool  (settings, "auto_start_np", true)
+    obs.obs_data_set_default_string(settings, "twitch_channel", "irishvideogameorchestra")
+    obs.obs_data_set_default_bool  (settings, "clip_player", true)
+    obs.obs_data_set_default_string(settings, "clip_size", "large")
 
     obs.obs_data_set_default_string(settings, "arr_piece",         "AERITH'S SUITE")
     obs.obs_data_set_default_string(settings, "arr_collection",    "FINAL FANTASY VII REBIRTH")
@@ -945,6 +1071,22 @@ function script_properties()
         obs.OBS_TEXT_INFO)
     obs.obs_properties_add_button(props, "btn_start_np", "Start Now Playing watcher now",
         function(_, _) start_now_playing_watcher(); return true end)
+
+    obs.obs_properties_add_text(props, "twitch_channel", "Twitch channel", obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_text(props, "_twitch_channel_hint",
+        "Channel login the clip player reads chat from — and the only channel whose clips play from viewer links.",
+        obs.OBS_TEXT_INFO)
+    obs.obs_properties_add_bool(props, "clip_player", "Clip player (chat clip links + !so shoutouts)")
+    obs.obs_properties_add_text(props, "_clip_player_hint",
+        "Plays a panel when anyone posts a link to one of this channel's clips, or when a mod types !so <user> (shows that streamer's featured clip). Raid alerts interrupt it. Uncheck and rebuild scenes to remove the source.",
+        obs.OBS_TEXT_INFO)
+    local clip_size = obs.obs_properties_add_list(props, "clip_size", "Clip player size",
+        obs.OBS_COMBO_TYPE_LIST, obs.OBS_COMBO_FORMAT_STRING)
+    obs.obs_property_list_add_string(clip_size, "Large — 1280x720, centered",     "large")
+    obs.obs_property_list_add_string(clip_size, "Small — 960x540, top-left",      "small")
+    obs.obs_properties_add_text(props, "_clip_size_hint",
+        "Large covers the middle of the canvas; small tucks under the header bar in the top-left corner so gameplay stays readable. Rebuild scenes after changing.",
+        obs.OBS_TEXT_INFO)
 
     obs.obs_properties_add_text(props, "arr_piece",         "Arranging: Piece (boot default only — change with !piece in chat)",      obs.OBS_TEXT_DEFAULT)
     obs.obs_properties_add_text(props, "arr_collection",    "Arranging: Game (boot default only — change with !from in chat)",       obs.OBS_TEXT_DEFAULT)

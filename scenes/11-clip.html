@@ -1,0 +1,659 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>IVGO · 11 Clip</title>
+<meta name="viewport" content="width=1920"/>
+<style>
+  html,body{margin:0;padding:0;background:transparent;width:1920px;height:1080px;overflow:hidden}
+
+  /* Panel pop — settles with a slight overshoot so it reads as "landing"
+     rather than fading in. Matches the toast/fire motion language. */
+  @keyframes clip-in {
+    0%   { opacity:0; transform:translateY(20px) scale(.965); }
+    70%  { opacity:1; transform:translateY(0)    scale(1.006); }
+    100% { opacity:1; transform:translateY(0)    scale(1); }
+  }
+  @keyframes clip-out {
+    from { opacity:1; transform:scale(1); }
+    to   { opacity:0; transform:scale(.985); }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="../phoenix.min.js"></script>
+<script src="../ivgo-shared.js"></script>
+
+<script>
+(function () {
+  const { T, bus } = window.IVGO;
+  const e = React.createElement;
+
+  // Centered clip player. Watches Twitch chat over an anonymous IRC socket and
+  // plays back clips in a chamfered panel in the middle of the canvas:
+  //
+  //   1. Any viewer pasting a clip link  → plays it, but ONLY if the clip
+  //      belongs to CHANNEL. Someone else's clip is silently ignored, so a
+  //      random link can't put arbitrary video/audio on the stream.
+  //   2. A mod typing `!so <user>` / `!shoutout <user>` → plays one of that
+  //      streamer's own Featured Clips (random pick), falling back to their
+  //      most-viewed clip. The broadcaster filter is skipped here, since the
+  //      whole point is to show someone else's channel.
+  //
+  // Clip slugs are resolved to a signed, direct MP4 via Twitch's GQL endpoint
+  // using the public web Client-Id. This is what makes the panel possible at
+  // all: the official `clips.twitch.tv/embed` iframe needs a `parent=` domain
+  // matching a real HTTP origin, and OBS loads these scenes over file:// —
+  // and Helix only returns metadata, not a playable file. The GQL endpoint
+  // answers `Access-Control-Allow-Origin: *`, so the fetch works from file://.
+  //
+  // Caveat: that endpoint is undocumented. If Twitch changes it, clips stop
+  // resolving and the panel simply never appears (everything fails soft, and
+  // logs to the browser-source console). Nothing else on the overlay breaks.
+  //
+  // URL params:
+  //   clip_off=1        disable entirely on this source
+  //   channel=<login>   chat channel to read + the only broadcaster whose
+  //                     clips play from viewer links (default IVGO)
+  //   clip_size=large   1280×720, centered on the canvas (default)
+  //   clip_size=small   960×540, anchored to the top-left
+  //   clip_w / clip_h   explicit video box size — overrides the preset
+  //   clip_top/clip_left  anchor offset in px — overrides the preset, and
+  //                     anchors a 'large' panel instead of centering it
+
+  const P = new URLSearchParams(location.search);
+  if (P.get('clip_off') === '1') return;
+
+  const CHANNEL = (P.get('channel') || 'irishvideogameorchestra').toLowerCase();
+
+  // Two presets rather than free-form sizing, so the panel is a scene-design
+  // decision rather than a pile of pixel values. `small` anchors below the
+  // 54px header bar and inset from the left edge — the same spot the video egg
+  // uses, so the two read as the same corner of the layout.
+  const SMALL   = (P.get('clip_size') || 'large').toLowerCase() === 'small';
+  const PRESET  = SMALL ? { w: 960, h: 540, top: 64, left: 10 }
+                        : { w: 1280, h: 720, top: null, left: null };
+
+  const VIDEO_W = parseInt(P.get('clip_w') || PRESET.w, 10);
+  const VIDEO_H = parseInt(P.get('clip_h') || PRESET.h, 10);
+
+  // null on both = centered. Either one set = anchored.
+  const ANCHOR_TOP  = P.get('clip_top')  != null ? parseInt(P.get('clip_top'),  10) : PRESET.top;
+  const ANCHOR_LEFT = P.get('clip_left') != null ? parseInt(P.get('clip_left'), 10) : PRESET.left;
+  const ANCHORED    = ANCHOR_TOP != null || ANCHOR_LEFT != null;
+
+  // Chrome scales with the panel so a small player doesn't wear an oversized
+  // header. Everything else (spacing, tracking) is fine unchanged.
+  const HEADER_H    = SMALL ? 38 : 46;
+  const TITLE_SIZE  = SMALL ? 16 : 20;
+  const LABEL_SIZE  = SMALL ? 10 : 11;
+  const FOOTER_H    = SMALL ? 36 : 44;
+
+  const GQL_URL       = 'https://gql.twitch.tv/gql';
+  const GQL_CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';  // public Twitch web client id
+
+  const USER_COOLDOWN_MS   = 60000;          // per-viewer, link-triggered clips (mods exempt)
+  const GLOBAL_COOLDOWN_MS = 15000;          // breathing room between any two clips
+  const REPLAY_BLOCK_MS    = 30 * 60 * 1000; // same slug won't replay within this window
+  const RAID_BLOCK_MS      = 10000;          // raid alerts win — WeeManRaid.mp4 is 6.4s
+  const MAX_QUEUE          = 3;
+  const FADE_OUT_MS        = 400;
+
+  // ── Clip link matching ──────────────────────────────────────────────────
+  // Covers every shape Twitch hands out:
+  //   clips.twitch.tv/<Slug>
+  //   clips.twitch.tv/embed?clip=<Slug>&parent=...
+  //   twitch.tv/<channel>/clip/<Slug>?filter=clips&range=7d
+  //   m.twitch.tv/clip/<Slug>
+  // Slugs are [A-Za-z0-9_-], so a trailing `?`/`.`/`,` ends the match naturally.
+  const CLIP_RE = /(?:clips\.twitch\.tv\/(?:embed\?(?:[^\s]*?&)?clip=)?|(?:www\.|m\.)?twitch\.tv\/(?:[A-Za-z0-9_]{1,25}\/)?clip\/)([A-Za-z0-9_-]+)/i;
+  const SO_RE   = /^!(?:so|shoutout)\s+@?([A-Za-z0-9_]{1,25})\b/i;
+  // Kill switch — any mod, mid-clip, from a phone if need be.
+  const STOP_RE = /^!(?:clipstop|stopclip|skipclip)\b/i;
+
+  // ── GQL ─────────────────────────────────────────────────────────────────
+  const lit = s => JSON.stringify(String(s));   // safe string literal in a query
+
+  async function gql(query) {
+    const res = await fetch(GQL_URL, {
+      method: 'POST',
+      headers: { 'Client-Id': GQL_CLIENT_ID, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query })
+    });
+    if (!res.ok) throw new Error('gql http ' + res.status);
+    const json = await res.json();
+    if (json.errors && json.errors.length) throw new Error(json.errors[0].message);
+    return json.data;
+  }
+
+  // Prefer the quality that matches the panel; never upscale a 1080 file into
+  // a 720 box when a 720 rendition exists (smaller download, same result).
+  function pickQuality(qualities) {
+    const scored = qualities
+      .map(q => ({ q, n: parseInt(q.quality, 10) || 0 }))
+      .sort((a, b) => b.n - a.n);
+    return (scored.find(s => s.n <= VIDEO_H) || scored[scored.length - 1]).q;
+  }
+
+  async function resolveClip(slug) {
+    const data = await gql('{ clip(slug: ' + lit(slug) + ') {'
+      + ' slug title durationSeconds'
+      + ' broadcaster { login displayName }'
+      + ' curator { displayName }'
+      + ' game { name }'
+      + ' videoQualities { quality sourceURL }'
+      + ' playbackAccessToken(params: {platform:"web", playerBackend:"mediaplayer", playerType:"clips"}) { signature value }'
+      + ' } }');
+
+    const c = data && data.clip;
+    if (!c || !c.videoQualities || !c.videoQualities.length) return null;
+    const tok = c.playbackAccessToken;
+    if (!tok || !tok.signature || !tok.value) return null;
+
+    const chosen = pickQuality(c.videoQualities);
+    const sep = chosen.sourceURL.indexOf('?') === -1 ? '?' : '&';
+
+    return {
+      slug:            c.slug || slug,
+      title:           c.title || 'CLIP',
+      durationSeconds: c.durationSeconds || 0,
+      broadcaster:     (c.broadcaster && c.broadcaster.displayName) || '',
+      broadcasterLogin: ((c.broadcaster && c.broadcaster.login) || '').toLowerCase(),
+      curator:         (c.curator && c.curator.displayName) || '',
+      game:            (c.game && c.game.name) || '',
+      src: chosen.sourceURL + sep
+           + 'sig='   + encodeURIComponent(tok.signature)
+           + '&token=' + encodeURIComponent(tok.value)
+    };
+  }
+
+  // A shouted-out streamer's own pick: the curated "Featured Clips" shelf on
+  // their channel page. Falls back to their most-viewed clip when the shelf is
+  // empty or absent (plenty of small channels never set one up).
+  async function resolveShoutoutSlug(login) {
+    const data = await gql('{ user(login: ' + lit(login) + ') {'
+      + ' videoShelves(first: 5) { edges { node { title items { __typename ... on Clip { slug } } } } }'
+      + ' clips(first: 1, criteria: {filter: ALL_TIME, sort: VIEWS_DESC}) { edges { node { slug } } }'
+      + ' } }');
+
+    const u = data && data.user;
+    if (!u) return null;
+
+    const shelves = (u.videoShelves && u.videoShelves.edges) || [];
+    for (const edge of shelves) {
+      const node = edge && edge.node;
+      if (!node || !/featured/i.test(node.title || '')) continue;
+      const clips = (node.items || []).filter(it => it && it.__typename === 'Clip' && it.slug);
+      if (clips.length) return clips[Math.floor(Math.random() * clips.length)].slug;
+    }
+
+    const top = u.clips && u.clips.edges && u.clips.edges[0];
+    return (top && top.node && top.node.slug) || null;
+  }
+
+  // ── Director ────────────────────────────────────────────────────────────
+  // Owns queueing, cooldowns and raid deference. Hands finished clips to the
+  // React view via onShow/onHide callbacks so the view stays dumb.
+  const director = (function () {
+    const queue    = [];
+    const seen     = new Map();   // slug  → last played at
+    const userSeen = new Map();   // user  → last *attempt* at
+    const MAX_KEYS = 500;         // these live for the whole stream — keep them bounded
+
+    // Drop entries that are older than their window rather than letting the
+    // maps grow all session. Called on write, only once a map gets big.
+    function prune(map, windowMs) {
+      if (map.size <= MAX_KEYS) return;
+      const cutoff = Date.now() - windowMs;
+      map.forEach((at, key) => { if (at < cutoff) map.delete(key); });
+    }
+    let playing    = false;
+    let lastEndAt  = 0;
+    let raidUntil  = 0;
+    let pumpTimer  = null;
+    let view       = { show: () => {}, hide: () => {} };
+
+    function setView(v) { view = v; }
+
+    function blockedFor(now) {
+      if (playing) return Infinity;                      // wait for 'ended'
+      if (now < raidUntil) return raidUntil - now;
+      const sinceEnd = now - lastEndAt;
+      if (lastEndAt && sinceEnd < GLOBAL_COOLDOWN_MS) return GLOBAL_COOLDOWN_MS - sinceEnd;
+      return 0;
+    }
+
+    function pump() {
+      if (!queue.length) return;
+      const wait = blockedFor(Date.now());
+      if (wait === Infinity) return;                     // pumped again on ended
+      if (wait > 0) {
+        if (pumpTimer) return;
+        pumpTimer = setTimeout(() => { pumpTimer = null; pump(); }, wait + 50);
+        return;
+      }
+      const item = queue.shift();
+      playing = true;
+      view.show(item);
+    }
+
+    // Called by the view when playback finishes, errors, or times out.
+    function finished() {
+      if (!playing) return;
+      playing   = false;
+      lastEndAt = Date.now();
+      view.hide();
+      pump();
+    }
+
+    async function enqueueLink(slug, userKey, isMod) {
+      const now = Date.now();
+      if (now < raidUntil) return;
+      if (queue.length >= MAX_QUEUE) return;
+
+      // Mods and the broadcaster are exempt from the replay block, same as
+      // they're exempt from the per-viewer cooldown below: re-posting a clip
+      // deliberately (to show it again, or because the first attempt was cut
+      // short) is a normal thing for staff to do. Viewers still can't loop the
+      // same clip at chat.
+      const lastSlug = seen.get(slug);
+      if (!isMod && lastSlug && now - lastSlug < REPLAY_BLOCK_MS) return;
+
+      // The per-viewer cooldown is stamped on *attempt*, before the network
+      // round-trip — otherwise someone spamming links to other channels' clips
+      // would never trip it (those get rejected below) and every message would
+      // fire another GQL lookup. One lookup per viewer per cooldown, period.
+      if (!isMod) {
+        const lastUser = userSeen.get(userKey);
+        if (lastUser && now - lastUser < USER_COOLDOWN_MS) return;
+        userSeen.set(userKey, now);
+        prune(userSeen, USER_COOLDOWN_MS);
+      }
+
+      let clip;
+      try { clip = await resolveClip(slug); }
+      catch (err) { console.warn('[IVGO clip] resolve failed for ' + slug + ':', err.message); return; }
+      if (!clip) return;
+
+      // The gate: viewer links only play our own channel's clips.
+      if (clip.broadcasterLogin !== CHANNEL) {
+        console.log('[IVGO clip] ignoring clip from ' + clip.broadcasterLogin + ' (not ' + CHANNEL + ')');
+        return;
+      }
+
+      // Re-check after the await — the queue may have filled or a raid landed
+      // while the network round-trip was in flight.
+      if (queue.length >= MAX_QUEUE || Date.now() < raidUntil) return;
+      // Same mod exemption as the pre-flight check — the slug resolved from
+      // the link can differ in case from the canonical one, so this is the
+      // check that actually catches most repeats.
+      if (!isMod && seen.has(clip.slug) && Date.now() - seen.get(clip.slug) < REPLAY_BLOCK_MS) return;
+
+      seen.set(clip.slug, Date.now());
+      prune(seen, REPLAY_BLOCK_MS);
+      queue.push({ kind: 'link', clip: clip });
+      pump();
+    }
+
+    // kind:    'shoutout' (!so) | 'raidout' (we're raiding someone)
+    // preempt: skip the queue and every cooldown, cutting off anything playing.
+    //          Used for a raid-out, which is time-critical — the raid fires on
+    //          its own countdown and won't wait behind a viewer's clip.
+    async function enqueueShoutout(login, kind, preempt) {
+      kind = kind || 'shoutout';
+      const now = Date.now();
+      if (!preempt) {
+        if (now < raidUntil) return;
+        if (queue.length >= MAX_QUEUE) return;
+      }
+
+      let clip;
+      try {
+        const slug = await resolveShoutoutSlug(login);
+        if (!slug) { console.log('[IVGO clip] no featured/top clip for ' + login); return; }
+        clip = await resolveClip(slug);
+      } catch (err) {
+        console.warn('[IVGO clip] shoutout resolve failed for ' + login + ':', err.message);
+        return;
+      }
+      if (!clip) return;
+      if (!preempt && (queue.length >= MAX_QUEUE || Date.now() < raidUntil)) return;
+
+      seen.set(clip.slug, Date.now());
+      prune(seen, REPLAY_BLOCK_MS);
+
+      if (preempt) {
+        queue.length = 0;
+        abort();
+        // abort() stamps lastEndAt, and an incoming raid may have set
+        // raidUntil — clear both *after* it so neither holds this clip back.
+        raidUntil = 0;
+        lastEndAt = 0;
+      }
+      queue.push({ kind: kind, clip: clip });
+      pump();
+    }
+
+    // Pull whatever is on screen. The interrupted clip is never restarted — it
+    // stays in `seen`, so re-pasting the same link won't bring it back either.
+    function abort() {
+      if (playing) {
+        playing   = false;
+        lastEndAt = Date.now();
+        view.hide();       // the view pauses the video here, so audio cuts now
+      }
+      if (pumpTimer) { clearTimeout(pumpTimer); pumpTimer = null; }
+    }
+
+    // Raid alerts win: abort, then hold new clips off for the raid's length.
+    // Anything already queued still gets its turn once that window passes.
+    function raid() {
+      raidUntil = Date.now() + RAID_BLOCK_MS;
+      abort();
+      pump();
+    }
+
+    // `!clipstop` from a mod. Unlike a raid this also empties the queue —
+    // "cut it off" shouldn't mean the next queued clip starts a second later.
+    function stop() {
+      const dropped = queue.length;
+      queue.length = 0;
+      abort();
+      // abort() stamps lastEndAt, which would impose the 15s inter-clip gap.
+      // That gap exists to stop viewer clips machine-gunning back to back, not
+      // to penalise a deliberate stop — without this, posting a clip right
+      // after !clipstop looks like nothing happened for 15 seconds.
+      lastEndAt = 0;
+      console.log('[IVGO clip] stopped by mod' + (dropped ? ' (' + dropped + ' queued dropped)' : ''));
+    }
+
+    return { setView, enqueueLink, enqueueShoutout, finished, raid, stop };
+  })();
+
+  // ── Chat ────────────────────────────────────────────────────────────────
+  // Parsing is split from transport so the routing rules can be exercised
+  // without a live socket (see the harness note in the README).
+  function handleChatLine(line) {
+    if (!line.includes('PRIVMSG')) return;
+
+    const tags = {};
+    if (line.startsWith('@')) {
+      line.slice(1, line.indexOf(' ')).split(';').forEach(t => {
+        const eq = t.indexOf('=');
+        tags[t.slice(0, eq)] = t.slice(eq + 1);
+      });
+    }
+    const m = line.match(/PRIVMSG #\S+ :(.+)$/);
+    if (!m) return;
+
+    const text    = m[1].trim();
+    const badges  = tags['badges'] || '';
+    const isMod   = tags['mod'] === '1' || badges.indexOf('broadcaster/') !== -1;
+    const userKey = tags['user-id'] || (tags['display-name'] || 'viewer').toLowerCase();
+
+    if (isMod && STOP_RE.test(text)) { director.stop(); return; }
+
+    const so = isMod && text.match(SO_RE);
+    if (so) { director.enqueueShoutout(so[1].toLowerCase()); return; }
+
+    // First link only — one message pasting five clips shouldn't fill the
+    // whole queue by itself.
+    const link = text.match(CLIP_RE);
+    if (link) director.enqueueLink(link[1], userKey, isMod);
+  }
+
+  // Own anonymous IRC socket (justinfan), same handshake as ChatPanel, plus
+  // reconnect — this source stays mounted for the whole stream.
+  (function connectChat() {
+    let retryMs = 2000;
+    let ws;
+
+    function open() {
+      ws = new WebSocket('wss://irc-ws.chat.twitch.tv');
+
+      ws.onopen = () => {
+        retryMs = 2000;
+        ws.send('CAP REQ :twitch.tv/tags');
+        ws.send('PASS SCHMOOPIIE');
+        ws.send('NICK justinfan' + Math.floor(Math.random() * 99999));
+        ws.send('JOIN #' + CHANNEL);
+      };
+
+      ws.onmessage = (ev) => {
+        ev.data.split('\r\n').filter(Boolean).forEach(line => {
+          if (line.startsWith('PING')) { ws.send('PONG :tmi.twitch.tv'); return; }
+          handleChatLine(line);
+        });
+      };
+
+      ws.onclose = () => {
+        setTimeout(open, retryMs);
+        retryMs = Math.min(retryMs * 2, 30000);
+      };
+      ws.onerror = () => { try { ws.close(); } catch (_) {} };
+    }
+
+    open();
+  })();
+
+  // `channel.raid` carries both directions — the payload says which:
+  //   someone raids us  → to_broadcaster_user_login   is our channel
+  //   we raid someone   → from_broadcaster_user_login is our channel
+  //
+  // Incoming keeps the existing behaviour (raid alert wins, clip gets pulled).
+  // Outgoing plays the channel we're sending everyone to, exactly like !so —
+  // and preempts, since the raid countdown won't wait for a queue to drain.
+  //
+  // A payload with neither field is treated as incoming, which is what ivgo-ex
+  // sends today; this stays correct if it never adds the direction fields.
+  bus.on('channel.raid', (p) => {
+    const from = ((p && p.from_broadcaster_user_login) || '').toLowerCase();
+    const to   = ((p && p.to_broadcaster_user_login)   || '').toLowerCase();
+
+    if (from === CHANNEL && to && to !== CHANNEL) {
+      console.log('[IVGO clip] raiding out to ' + to + ' — playing their clip');
+      director.enqueueShoutout(to, 'raidout', true);
+      return;
+    }
+    director.raid();
+  });
+
+  // Twitch's native /shoutout button. It produces no IRC message of any kind
+  // — Twitch documents no shoutout msg-id for USERNOTICE or NOTICE — so the
+  // only way to see it is the EventSub `channel.shoutout.create` event, which
+  // needs a user token with moderator:read:shoutouts. That token lives in
+  // ivgo-ex, which already runs the EventSub pipeline for follows/subs/raids,
+  // so the backend subscribes and re-broadcasts on overlay:events and this
+  // side just listens. Until ivgo-ex broadcasts it, this handler is dormant
+  // and `!so` remains the working path — both land in the same place.
+  //
+  // Payload is the EventSub event body; the shouted-at channel is
+  // `to_broadcaster_user_login`.
+  bus.on('channel.shoutout.create', (p) => {
+    const target = p && (p.to_broadcaster_user_login || p.to_broadcaster_user_name);
+    if (!target) { console.warn('[IVGO clip] shoutout event with no target', p); return; }
+    director.enqueueShoutout(String(target).toLowerCase());
+  });
+
+  // Preview hooks — open this page in a browser to check the panel without
+  // waiting for live chat:
+  //   ?clip_test=<slug>      play a specific clip (broadcaster filter applies)
+  //   ?clip_test_so=<login>  play that streamer's featured clip as a shoutout
+  if (P.get('clip_test'))    director.enqueueLink(P.get('clip_test'), 'preview', true);
+  if (P.get('clip_test_so')) director.enqueueShoutout(P.get('clip_test_so').toLowerCase());
+
+  // ── View ────────────────────────────────────────────────────────────────
+  function ClipPanel() {
+    // item: { kind, clip } | null   phase: 'in' | 'out' | null
+    const [item,  setItem]  = React.useState(null);
+    const [phase, setPhase] = React.useState(null);
+    const [left,  setLeft]  = React.useState(0);   // seconds remaining
+    const [pct,   setPct]   = React.useState(0);
+    const videoRef = React.useRef(null);
+
+    React.useEffect(() => {
+      director.setView({
+        show: (next) => { setPct(0); setLeft(next.clip.durationSeconds || 0); setItem(next); setPhase('in'); },
+        hide: () => setPhase('out')
+      });
+    }, []);
+
+    // Fade-out finishes → unmount. Audio stops at the *start* of the fade, not
+    // the end: when a raid cuts a clip short, 400ms of clip audio talking over
+    // the raid alert is exactly what "raid wins" is supposed to prevent.
+    // Pausing again on unmount is belt-and-braces — CEF can otherwise keep the
+    // audio alive after the element leaves the DOM.
+    React.useEffect(() => {
+      if (phase !== 'out') return;
+      if (videoRef.current) videoRef.current.pause();
+      const t = setTimeout(() => {
+        if (videoRef.current) videoRef.current.pause();
+        setItem(null);
+        setPhase(null);
+      }, FADE_OUT_MS);
+      return () => clearTimeout(t);
+    }, [phase]);
+
+    // One playback lifecycle per item. The watchdog covers a stalled CDN
+    // response, where neither 'ended' nor 'error' ever fires and the panel
+    // would otherwise sit on screen forever.
+    React.useEffect(() => {
+      if (!item || phase !== 'in') return;
+      const v = videoRef.current;
+      if (v) {
+        v.volume = 1;
+        v.currentTime = 0;
+        v.play().catch(err => {
+          // Autoplay-with-sound blocked (shouldn't happen in OBS, but a
+          // manually-opened browser will) — show it muted rather than nothing.
+          console.warn('[IVGO clip] play() rejected, retrying muted:', err);
+          v.muted = true;
+          v.play().catch(() => director.finished());
+        });
+      }
+      const budget = Math.max(20000, ((item.clip.durationSeconds || 60) + 15) * 1000);
+      const watchdog = setTimeout(() => director.finished(), budget);
+      return () => clearTimeout(watchdog);
+    }, [item, phase]);
+
+    if (!item) return null;
+
+    const clip = item.clip;
+    const who  = (clip.broadcaster || '').toUpperCase();
+    // Each trigger gets its own accent so it's obvious at a glance which of
+    // the three this is: a viewer's clip, a shoutout, or an outgoing raid.
+    const KINDS = {
+      link:     { label: 'CLIP',              color: T.accent, glow: T.accentGlow },
+      shoutout: { label: 'SHOUTOUT · ' + who, color: T.amber,  glow: 'rgba(245,165,36,.6)' },
+      raidout:  { label: 'RAIDING · '  + who, color: T.live,   glow: 'rgba(255,90,60,.6)' }
+    };
+    const kind  = KINDS[item.kind] || KINDS.link;
+    const label = kind.label;
+    const credit = [
+      clip.curator ? 'CLIPPED BY ' + clip.curator.toUpperCase() : null,
+      clip.game ? clip.game.toUpperCase() : null
+    ].filter(Boolean).join('  ·  ');
+
+    const mm = Math.floor(left / 60);
+    const ss = Math.max(0, Math.ceil(left % 60));
+
+    const wrapperStyle = ANCHORED
+      ? { position: 'absolute', inset: 0, pointerEvents: 'none' }
+      : { position: 'absolute', inset: 0, pointerEvents: 'none',
+          display: 'flex', alignItems: 'center', justifyContent: 'center' };
+
+    const anchorStyle = ANCHORED
+      ? { position: 'absolute', top: ANCHOR_TOP || 0, left: ANCHOR_LEFT || 0 }
+      : {};
+
+    return e('div', { style: wrapperStyle },
+      e('div', {
+        className: 'ovl-chamfer',
+        style: {
+          ...anchorStyle,
+          width: VIDEO_W, background: '#06080a',
+          border: '1px solid ' + T.rule2,
+          boxShadow: '0 24px 80px rgba(0,0,0,.75), inset 0 1px 0 0 rgba(40,154,230,.28)',
+          overflow: 'hidden',
+          animation: phase === 'out'
+            ? 'clip-out ' + FADE_OUT_MS + 'ms ease-in both'
+            : 'clip-in 420ms cubic-bezier(.2,.8,.2,1) both'
+        }
+      },
+        // Header: what this is, who triggered it, how long is left.
+        e('div', {
+          style: {
+            height: HEADER_H, display: 'flex', alignItems: 'center', gap: 12,
+            padding: '0 18px', borderBottom: '1px solid ' + T.rule,
+            background: 'linear-gradient(90deg, ' + T.bg2 + ' 0%, ' + T.bg3 + ' 100%)'
+          }
+        },
+          e('div', { style: {
+            width: 8, height: 8, flexShrink: 0,
+            background: kind.color,
+            boxShadow: '0 0 10px ' + kind.glow
+          }}),
+          e('div', { style: {
+            fontFamily: T.mono, fontSize: LABEL_SIZE, letterSpacing: '.32em',
+            color: item.kind === 'link' ? T.ink2 : kind.color, whiteSpace: 'nowrap'
+          }}, label),
+          e('div', { style: { flex: 1 } }),
+          e('div', { style: {
+            fontFamily: T.mono, fontSize: LABEL_SIZE, letterSpacing: '.18em', color: T.ink3
+          }}, mm + ':' + String(ss).padStart(2, '0'))
+        ),
+
+        e('video', {
+          ref: videoRef,
+          key: clip.slug,
+          src: clip.src,
+          autoPlay: true, playsInline: true, preload: 'auto',
+          onEnded: () => director.finished(),
+          onError: () => { console.warn('[IVGO clip] video error for ' + clip.slug); director.finished(); },
+          onTimeUpdate: (ev) => {
+            const v = ev.currentTarget;
+            const dur = v.duration || clip.durationSeconds || 0;
+            if (dur) { setPct((v.currentTime / dur) * 100); setLeft(dur - v.currentTime); }
+          },
+          style: { display: 'block', width: VIDEO_W, height: VIDEO_H, background: '#000', objectFit: 'contain' }
+        }),
+
+        // Footer: clip title + who clipped it and from what game.
+        e('div', {
+          style: {
+            minHeight: FOOTER_H, display: 'flex', alignItems: 'center', gap: 18,
+            padding: '0 18px', borderTop: '1px solid ' + T.rule, background: '#06080a'
+          }
+        },
+          e('div', { style: {
+            fontFamily: T.display, fontSize: TITLE_SIZE, fontWeight: 700, letterSpacing: '.02em',
+            color: T.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
+          }}, clip.title),
+          e('div', { style: { flex: 1 } }),
+          credit && e('div', { style: {
+            fontFamily: T.mono, fontSize: 10, letterSpacing: '.22em', color: T.ink3,
+            whiteSpace: 'nowrap', flexShrink: 0
+          }}, credit)
+        ),
+
+        // Playback progress — hairline, same gradient language as GoalBar.
+        e('div', { style: { height: 3, background: '#101820' } },
+          e('div', { style: {
+            height: '100%', width: pct + '%',
+            background: 'linear-gradient(90deg, ' + T.accentDeep + ' 0%, ' + T.accent + ' 100%)',
+            boxShadow: '0 0 12px ' + T.accentGlow
+          }})
+        )
+      )
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(e(ClipPanel));
+})();
+</script>
+</body>
+</html>

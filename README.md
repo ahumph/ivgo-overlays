@@ -22,6 +22,7 @@ Extras layered on every scene:
 
 - **Now Playing** — a slide-out strip showing what's playing on Tidal / YouTube. Hidden by default; viewers reveal it with `!np` or `!playing` in chat.
 - **Fire Overlay** — triggered by the `!fine` chat command (costs 100 Ostis); plays a fire effect over whatever scene you're on.
+- **Clip Player** — paste a link to one of this channel's clips in chat and it plays in a panel (centered, or small in the top-left); mods can `!so <user>` to play another streamer's featured clip. Clips from other channels are ignored.
 - **Raid alerts** — a Twitch raid pops the usual toast + `media/raid.mp4` egg *and* fades in a fullscreen `media/WeeManRaid.mp4` backdrop behind them (black-keyed via an SVG luma filter, with audio).
 - **Mic mute indicator** — a small icon at the top-left (`media/mute.png` while the OBS *Mic/Aux* input is muted; `media/microphone.png` flashes for ~2s then fades out on unmute). Reads OBS state over obs-websocket.
 
@@ -68,6 +69,9 @@ These appear on the right when the script is selected. All have sensible default
 | **Countdown (mins)** | How long the Starting Soon countdown starts at when the scene loads. `5` = "STARTING IN 05:00". Set to `0` to hide the countdown box entirely. |
 | **Socket URL** | Where the overlay's Phoenix backend lives. Use `wss://ivgorchestra.fly.dev/overlay` for live, `ws://localhost:4000/overlay` for local dev, or leave blank to skip the chat-event integration entirely. |
 | **Now-Playing HTTP base** | URL of the local PowerShell watch script. Default `http://localhost:7779`. Leave blank to skip the Now Playing overlay. |
+| **Twitch channel** | Channel login the Clip Player reads chat from — and the only channel whose clips play from viewer links. |
+| **Clip player** | Whether to add the Clip Player source at all. Uncheck and rebuild to remove it. |
+| **Clip player size** | *Large* (1280×720, centered) or *Small* (960×540, top-left). |
 | **Arranging: Piece / Game** | Boot-time defaults only — shown on the Arranging scene's "ON THE DESK" info card on first paint. Change live with `!piece` / `!from` in chat. |
 | **Arranging: total sprints / focus mins / break mins** | Pomodoro defaults for the Arranging scene's timer. Chat can override at runtime. |
 
@@ -162,6 +166,7 @@ The Phoenix backend (`ivgo-ex`) listens to chat and broadcasts to the overlays. 
 | `!help` | Bot replies with a one-line command summary. 60s cooldown per user. |
 | `!np` / `!playing` | Slide the Now Playing strip down for 30s (shows current Tidal / YouTube / etc. track). |
 | `!fine` | Trigger the fire overlay. Costs 100 Ostis. |
+| *(paste a clip link)* | Plays the clip in a centered panel — **only** clips from this channel. Any other channel's clip is silently ignored. 60s cooldown per viewer, 15s between clips, same clip won't replay within 30 min. Mods and the broadcaster are exempt from the per-viewer cooldown and the replay block, so they can re-post a clip deliberately. |
 
 ### Mods + broadcaster only
 
@@ -177,6 +182,8 @@ The Phoenix backend (`ivgo-ex`) listens to chat and broadcasts to the overlays. 
 | `!pomo next` | Flip phase focus↔break, reset countdown, increment sprint counter on leaving break. |
 | `!task clear` | Wipe all tasks (spam escape hatch). |
 | `!task del <id>` | Remove a specific task by id (id shown in the mod-only LiveView control panel). |
+| `!clipstop` / `!stopclip` / `!skipclip` | Cut off the clip that's playing right now and empty the queue. Instant — video and audio both stop. |
+| `!so <user>` / `!shoutout <user>` | Play one of that streamer's own Featured Clips (picked at random) in the centered panel, styled amber. Falls back to their most-viewed clip if they haven't set a featured shelf; does nothing if they have no clips. Mods are exempt from the per-viewer clip cooldown. |
 
 > The timer does **not** auto-advance when it hits zero — phase changes only happen on explicit `!pomo start` / `stop` / `reset` / `next`. This is deliberate: keeps the chat in the loop on cadence.
 
@@ -235,7 +242,8 @@ For the now-playing source: `http://localhost:7779/scenes/09-now-playing.html?de
 | Cam Outline | Browser (`02-cam-outline.html?toasts=0`) | 0, 0 | 1920×1080 |
 | Chat | Browser (`02-chat.html?toasts=0`) | 0, 0 | 1920×1080 |
 | Now Playing | Browser (`http://localhost:7779/scenes/09-now-playing.html?debug=0`) | 0, 110 | 1920×1080 |
-| Fire Overlay | Browser (`10-fire.html`) | 0, 0 | 1920×1080 |
+| Clip Player | Browser (`11-clip.html?toasts=0&egg_off=1&raid_bg_off=1&channel=...&clip_size=...`) | 0, 0 | 1920×1080 |
+| Fire Overlay | Browser (`10-fire.html?toasts=0&egg_off=1&raid_bg_off=1`) | 0, 0 | 1920×1080 |
 
 **03 Camera**
 | Source | Type | Position | Size |
@@ -243,6 +251,7 @@ For the now-playing source: `http://localhost:7779/scenes/09-now-playing.html?de
 | Host Camera | Video Capture | 320, 180 | 1280×720 |
 | Camera Overlay | Browser (`03-camera.html?host=...&hostRole=...`) | 0, 0 | 1920×1080 |
 | Now Playing | Browser | 0, 0 | 1920×1080 |
+| Clip Player | Browser | 0, 0 | 1920×1080 |
 | Fire Overlay | Browser | 0, 0 | 1920×1080 |
 
 **05 Two Camera**
@@ -252,6 +261,7 @@ For the now-playing source: `http://localhost:7779/scenes/09-now-playing.html?de
 | Guest Camera | Video Capture | 1010, 72 | 904×858 |
 | Two-Cam Overlay | Browser (`05-two-cam.html?host=...&guest=...&topic=...`) | 0, 0 | 1920×1080 |
 | Now Playing | Browser | 0, 0 | 1920×1080 |
+| Clip Player | Browser | 0, 0 | 1920×1080 |
 | Fire Overlay | Browser | 0, 0 | 1920×1080 |
 
 **07 Arranging**
@@ -265,6 +275,7 @@ For the now-playing source: `http://localhost:7779/scenes/09-now-playing.html?de
 | Arranging Cam Outline | Browser (`07-cam-outline.html?toasts=0`) | 0, 0 | 1920×1080 |
 | Arranging Chat | Browser (`07-chat.html?toasts=0`) | 0, 0 | 1920×1080 |
 | Now Playing | Browser | 0, 0 | 1920×1080 |
+| Clip Player | Browser | 0, 0 | 1920×1080 |
 | Fire Overlay | Browser | 0, 0 | 1920×1080 |
 
 **01 Starting Soon / 04 BRB / 06 Ending**
@@ -273,6 +284,7 @@ For the now-playing source: `http://localhost:7779/scenes/09-now-playing.html?de
 | (Video — Media Source for 01 and 06) | Media Source — `media/buts.mkv` or `media/tetris.webm` | 0, 0 | 1920×1080 |
 | Scene overlay | Browser (`01-starting-soon.html?mins=5&secs=0` / `04-brb.html` / `06-ending.html`) | 0, 0 | 1920×1080 |
 | Now Playing | Browser | 0, 0 | 1920×1080 |
+| Clip Player | Browser | 0, 0 | 1920×1080 |
 | Fire Overlay | Browser | 0, 0 | 1920×1080 |
 
 > OBS layer order: sources lower in the list appear behind sources higher in the list. Browser overlays must be near the top so chrome (logo, ticker, info panel) draws over cameras and game capture.
@@ -301,6 +313,83 @@ To re-download the BRB video from YouTube, see `tools/README.md` for the `yt-dlp
 
 The trigger is server-side: `!fine` chat command, costs 100 Ostis, broadcasts the `overlay.fire` event on Phoenix. Animation is `media/overlay/fire-alpha.webm` — a VP9 video with alpha channel and muxed crackle audio. Replace the file to change the look/sound. Default reveal length is 16s (one full audio play).
 
+### Clip player
+
+`scenes/11-clip.html` — a clip panel added to every scene as the `IVGO: Clip Player` browser source. Two sizes, set with **Clip player size** in the script settings:
+
+| Size | Dimensions | Placement |
+|---|---|---|
+| **Large** (default) | 1280×720 | Centered on the canvas |
+| **Small** | 960×540 | Top-left, tucked under the header bar (10, 64) |
+
+Small also pulls the 480p rendition instead of 720p, and scales the header/footer chrome to match. Unlike the rest of the chat features, this one is **entirely client-side**: it opens its own anonymous IRC connection and needs no Phoenix backend, no Twitch app, and no API token.
+
+Two triggers:
+
+- **Anyone pastes a clip link.** All link shapes work (`clips.twitch.tv/<slug>`, `twitch.tv/<channel>/clip/<slug>?filter=...`, `m.twitch.tv/clip/<slug>`, embed URLs). The clip plays **only if it belongs to this channel** — anyone else's clip is dropped with a console note. That filter is the whole safety story: without it, any viewer could put arbitrary video and audio on the stream.
+- **A mod types `!so <user>`.** Plays a random clip from that streamer's Featured Clips shelf, falling back to their most-viewed clip. The channel filter is skipped here by design.
+
+Clips play at full volume — ride your own levels. The installer configures the source's audio for you: **Control audio via OBS** (`reroute_audio`) so it lands in the mixer as its own channel, and **Monitor and Output** so you hear it too. Without the first, browser audio bypasses the mixer and only reaches the stream if you happen to capture desktop audio.
+
+Unlike the other overlay sources, the Clip Player is also set to **not** shut down when hidden and **not** refresh on scene activation. It's stateful — an IRC connection plus every cooldown and already-played record — so a restart would kill a playing clip and reset the spam limits on every scene change.
+
+Raid alerts win: a raid pulls the panel off screen immediately, cuts its audio, drops the interrupted clip, and blocks new ones for 10s (the length of `WeeManRaid.mp4`).
+
+#### Cutting a clip short
+
+Clips run up to Twitch's 60s maximum, so there are two ways to pull one:
+
+- **`!clipstop` in chat** (mods and broadcaster) — the everyday lever. Stops playback instantly and empties the queue, so the next clip doesn't just start a second later. Works from a phone. Aliases: `!stopclip`, `!skipclip`.
+- **A hotkey** — bind one under OBS → **Settings** → **Hotkeys** → *IVGO: Stop clip player*. No key is bound out of the box. Use this when you're mid-game and typing in chat isn't realistic.
+
+The hotkey works by reloading the Clip Player source, which is blunt but needs no extra plumbing: OBS Lua has no clean channel into a running browser page. The side effect is that per-viewer cooldowns and the already-played list reset, so whoever posted the clip you just pulled could immediately re-post it. `!clipstop` has no such downside — the stopped clip stays on the already-played list and can't come back for 30 minutes. Prefer chat where you can.
+
+An interrupted clip is never resumed, by either route.
+
+There are two more triggers, both already wired on the overlay side but **dormant until `ivgo-ex` broadcasts them** (see below):
+
+- **Twitch's native `/shoutout` button** — plays the shouted-at streamer's featured clip, same as `!so`.
+- **Starting a raid** — when *we* raid someone, plays the channel we're sending everyone to, labelled `RAIDING · <CHANNEL>` in red. This one preempts: it clears the queue and cuts off anything playing, because the raid fires on its own countdown and won't wait. An *incoming* raid never plays a clip — it pulls the panel instead, and shouting the raider out is the way to show their clip.
+
+#### What ivgo-ex needs to send
+
+Neither is detectable client-side. Twitch documents no shoutout `msg-id` for `USERNOTICE` or `NOTICE`, so an anonymous IRC connection cannot see a `/shoutout` at all, and an outgoing raid produces no chat message either. Both are EventSub-only, and EventSub needs a user token — which lives in `ivgo-ex`, where the follow/sub/raid pipeline already runs.
+
+| Event | Subscription | Scope |
+|---|---|---|
+| `channel.shoutout.create` | `broadcaster_user_id` + `moderator_user_id` = IVGO | `moderator:read:shoutouts` |
+| `channel.raid` (outgoing) | `from_broadcaster_user_id` = IVGO | none |
+
+Re-broadcast both on `overlay:events` under their EventSub names, with the event body intact — the overlay reads `to_broadcaster_user_login` from each. Note `channel.raid` is likely already subscribed with `to_broadcaster_user_id` for incoming raids; outgoing needs a **second** subscription with the `from_` condition.
+
+New event names must also be added to the allowlist in `ivgo-shared.js` (the `_channel.on(type, …)` array) — an event not named there never reaches `bus.on()` listeners. `channel.shoutout.create` is already in it.
+
+Because both raid directions arrive on the same event name, the overlay branches on the payload: `from_broadcaster_user_login` matching our channel means outgoing. The raid alerts (toast, egg, WeeMan backdrop) are gated the same way, so they only fire for a raid arriving — a payload with no `from_` field counts as incoming, so nothing changes until those subscriptions exist.
+
+To preview the panel without live chat, open the page in any browser with a test param:
+
+```
+scenes/11-clip.html?clip_test=<clip-slug>
+scenes/11-clip.html?clip_test_so=<streamer-login>
+```
+
+Tuning (cooldowns, queue depth, raid block) lives in the constants at the top of `scenes/11-clip.html`. Turn the whole thing off with the **Clip player** checkbox in the script settings, or per-source with `?clip_off=1`.
+
+Per-source URL overrides, if one scene wants different treatment from the rest:
+
+| Param | Effect |
+|---|---|
+| `clip_size=large` / `small` | The two presets above. |
+| `clip_w` / `clip_h` | Explicit video box size, overriding the preset. |
+| `clip_top` / `clip_left` | Anchor offset in px. Setting either one anchors the panel instead of centering it — so a large panel can sit in a corner too. |
+| `clip_off=1` | Disable on this source. |
+
+#### How clips resolve to video
+
+Twitch's official `clips.twitch.tv/embed` iframe requires a `parent=` domain matching a real HTTP origin, and OBS loads these scenes over `file://` — so the embed is out. Helix returns clip metadata but no playable file (the old "swap the thumbnail suffix for `.mp4`" trick doesn't work on clips hosted under `twitch-video-assets`). So the page queries Twitch's GQL endpoint with the public web Client-Id for a signed, direct MP4, which a plain `<video>` element plays.
+
+That endpoint is undocumented — the same one clip downloaders use. It works today from a `file://` origin (it answers `Access-Control-Allow-Origin: *`), but Twitch owes it no stability. If it ever changes, clips stop resolving and the panel just never appears — nothing else on the overlay is affected, and the reason lands in the browser-source console.
+
 ---
 
 ## Troubleshooting
@@ -322,6 +411,12 @@ The crop values in the installer (`top=825, bottom=2, left=35, right=41`) assume
 
 **Fire overlay shows but black background isn't transparent.**
 You're using `fire.webm` instead of `fire-alpha.webm`. The alpha-channel version is what the overlay loads by default — confirm `scenes/10-fire.html` references `fire-alpha.webm`.
+
+**Changed `11-clip.html` but the Clip Player still behaves like the old version.**
+The source is serving a cached page. OBS only reloads a browser source when its **URL** changes, and this one deliberately has *refresh on scene activation* off (it's stateful), so an HTML edit that doesn't also change a URL param won't be picked up. Clicking **Create / Refresh Scenes** now forces a no-cache reload of this source, so that's the fix — or right-click `IVGO: Clip Player` → **Refresh cache of current page**.
+
+**Clip plays but you can't hear it (or viewers can't).**
+The installer sets this up, so this should only bite a source created before the audio wiring existed — click **Create / Refresh Scenes** to re-apply it. To check by hand: right-click `IVGO: Clip Player` → **Properties** → tick **Control audio via OBS**, then right-click it in the **Audio Mixer** → **Advanced Audio Properties** → set **Audio Monitoring** to *Monitor and Output*. Without the first, browser audio bypasses the mixer entirely and only reaches the stream if you happen to capture desktop audio; without the second, you won't hear it in your own headphones.
 
 **Mic mute icon never appears (or never disappears).**
 Check obs-websocket is enabled: OBS → **Tools** → **WebSocket Server Settings** → Server Enabled, port 4455. If you've set a password, append `?obsws_pw=yourpassword` to the overlay browser-source URL. If your mic input isn't called *Mic/Aux*, override with `?mic_input=Your Input Name`. Disable per-source with `?mic_off=1`.
@@ -373,7 +468,8 @@ ivgo-overlays/
 │   ├── 07-chat.html
 │   ├── 08-keyboard-frame.html
 │   ├── 09-now-playing.html         # served by tools/now-playing-watch.ps1
-│   └── 10-fire.html                # !fine reward overlay
+│   ├── 10-fire.html                # !fine reward overlay
+│   └── 11-clip.html                # centered clip player (chat links + !so)
 └── tools/
     ├── README.md                   # SMTC watch script docs
     ├── now-playing-watch.ps1       # SMTC poller + HTTP server (Windows PS 5.1)
@@ -398,4 +494,7 @@ Things to be aware of when hosting:
 - Live chat events come from a Phoenix backend (`ivgo-ex`, separate repo) over a WebSocket.
 - Now Playing reads local Windows SMTC via a PowerShell script that serves both the JSON state and the overlay HTML over `http://localhost:7779`.
 - The Fire Overlay listens to `overlay.fire` on the Phoenix `overlay:events` channel — wired in `ivgo-shared.js`.
+- The Clip Player is the one chat feature that doesn't go through Phoenix: it reads chat over its own anonymous Twitch IRC socket and resolves clips to signed MP4s via Twitch GQL, so it works with the backend offline. Its native-`/shoutout` and raid-out triggers are the exception — those are EventSub-only and need `ivgo-ex` to broadcast them.
+- `channel.raid` covers raids in both directions. Anything reacting to it should check `from_broadcaster_user_login` against our channel; alerts are a welcome and must not fire when we raid out.
+- Every page that connects to the bus mounts toasts, the video egg and the raid backdrop (the auto-wire block in `ivgo-shared.js`). Full-canvas overlay sources stacked on top of a scene must therefore pass `toasts=0&egg_off=1&raid_bg_off=1`, or alerts fire twice with doubled audio.
 - Animations use the modern CSS `translate` property; requires Chromium 104+. OBS 28+ satisfies this.

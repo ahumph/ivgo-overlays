@@ -142,7 +142,9 @@ const _bus = (function () {
       _socket.connect();
 
       _channel = _socket.channel('overlay:events', {});
-      ['channel.follow', 'channel.subscribe', 'channel.subscription.gift', 'channel.cheer', 'channel.raid', 'overlay.fire'].forEach(type => {
+      // Allowlist — a server-pushed event not named here never reaches
+      // bus.on() listeners, so new event types must be added in both places.
+      ['channel.follow', 'channel.subscribe', 'channel.subscription.gift', 'channel.cheer', 'channel.raid', 'channel.shoutout.create', 'overlay.fire'].forEach(type => {
         _channel.on(type, payload => dispatch(type, payload));
       });
       _channel.join()
@@ -731,17 +733,33 @@ const _micMute = (function () {
 // Auto-wire Twitch events to toasts and video easter egg
 if (typeof document !== 'undefined') {
   document.addEventListener('DOMContentLoaded', function () {
+    // channel.raid fires for raids in both directions. The alerts (toast, egg,
+    // WeeMan backdrop) are a *welcome* — they should only fire for a raid
+    // arriving, never when we raid out to someone else.
+    //
+    // A payload with no from_broadcaster_user_login is treated as incoming,
+    // which is what ivgo-ex sends today, so this changes nothing until it
+    // starts broadcasting outgoing raids too.
+    const _ourChannel = (function () {
+      const p = typeof location !== 'undefined' ? new URLSearchParams(location.search) : null;
+      return ((p && p.get('channel')) || 'irishvideogameorchestra').toLowerCase();
+    })();
+    const _isOutgoingRaid = p =>
+      !!(p && p.from_broadcaster_user_login &&
+         String(p.from_broadcaster_user_login).toLowerCase() === _ourChannel);
+    const _onIncomingRaid = fn => p => { if (!_isOutgoingRaid(p)) fn(p); };
+
     _bus.on('channel.follow', p => _toast.toast({ type: 'follow', ...p }));
     _bus.on('channel.subscribe', p => _toast.toast({ type: 'sub', ...p }));
     _bus.on('channel.subscription.gift', p => _toast.toast({ type: 'gift', ...p }));
     _bus.on('channel.cheer', p => _toast.toast({ type: 'cheer', ...p }));
-    _bus.on('channel.raid', p => _toast.toast({ type: 'raid', ...p }));
+    _bus.on('channel.raid', _onIncomingRaid(p => _toast.toast({ type: 'raid', ...p })));
 
     _bus.on('channel.follow',            () => _videoEgg.alrighty());
     _bus.on('channel.subscribe',         () => _videoEgg.alrighty());
     _bus.on('channel.subscription.gift', () => _videoEgg.alrighty());
-    _bus.on('channel.raid',              () => _videoEgg.raid());
-    _bus.on('channel.raid',              () => _raidBackdrop.play());
+    _bus.on('channel.raid',              _onIncomingRaid(() => _videoEgg.raid()));
+    _bus.on('channel.raid',              _onIncomingRaid(() => _raidBackdrop.play()));
 
     _micMute.start();
   });
