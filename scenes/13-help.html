@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>IVGO · 13 Commands</title>
+<meta name="viewport" content="width=1920"/>
+<style>
+  html,body{margin:0;padding:0;background:transparent;width:1920px;height:1080px;overflow:hidden}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="../phoenix.min.js"></script>
+<script src="../ivgo-shared.js"></script>
+
+<script>
+(function () {
+  const { T } = window.IVGO;
+  const e = React.createElement;
+
+  // `!info` for the scenes that aren't 07 Arranging.
+  //
+  // Arranging already has an !info: it slides the ON THE DESK piece card up
+  // from the ticker, driven server-side by ivgo-ex. This is the same gesture
+  // and the same label handle, but the panel lists the chat commands that
+  // actually work on this scene, so a viewer arriving on the Game scene can
+  // find out what they can do. This source is deliberately not added to the
+  // Arranging scene, which would otherwise slide two panels up at once.
+  //
+  // Read straight off chat rather than through Phoenix. Nothing here needs
+  // server state, and it keeps working with the backend offline.
+  //
+  // URL params:
+  //   help_off=1        disable on this source
+  //   channel=<login>   chat channel to read (default IVGO)
+  //   help_items=a,b,c  which rows to list, in order (see CATALOG)
+  //   help_secs=10      seconds the card stays up
+  //   help_cooldown=30  seconds before !info works again
+  //   help_left / help_right   panel insets, to clear a scene's chat panel
+
+  const P = new URLSearchParams(location.search);
+  if (P.get('help_off') === '1') return;
+
+  const CHANNEL      = (P.get('channel') || 'irishvideogameorchestra').toLowerCase();
+  const VISIBLE_MS   = (parseInt(P.get('help_secs') || '10', 10)) * 1000;
+  const COOLDOWN_MS  = (parseInt(P.get('help_cooldown') || '30', 10)) * 1000;
+  // Defaults match the Arranging info panel: left:86 aligns the 10px chamfer
+  // with the label handle, and the right inset clears a scene's chat panel
+  // (10 margin + 374 rendered chat + 16 gap).
+  const LEFT         = parseInt(P.get('help_left') || '86', 10);
+  const RIGHT        = parseInt(P.get('help_right') || '400', 10);
+
+  const INFO_RE = /^!(?:info|commands)\b/i;
+
+  // Every row the card can show.
+  //
+  // Two kinds live here. The overlay commands are ours, and the installer
+  // passes only the ones whose feature is switched on, so the card never
+  // advertises something that would do nothing. The rest (concerts, socials,
+  // discord, x) are answered in chat by Nightbot, not by this pack — they are
+  // listed because they work, but nothing here handles them. If a Nightbot
+  // command is renamed or removed, this list has to be updated by hand.
+  const CATALOG = {
+    np:       { cmd: '!np',              desc: 'Show what is playing right now' },
+    clip:     { cmd: 'post a clip link', desc: 'Plays that IVGO clip on stream' },
+    weeman:   { cmd: '!weeman',          desc: 'Send your own WeeMan out for 15 minutes' },
+    fine:     { cmd: '!fine',            desc: 'Set the stream on fire · 100 Ostis' },
+    concerts: { cmd: '!concerts',        desc: 'Upcoming IVGO concert dates' },
+    socials:  { cmd: '!socials',         desc: 'Every place you can follow IVGO' },
+    discord:  { cmd: '!discord',         desc: 'Join the IVGO Discord' },
+    // Left blank on purpose. It is a joke command, and explaining it kills it.
+    x:        { cmd: '!x',               desc: '' },
+    info:     { cmd: '!info',            desc: 'Show this card' }
+  };
+
+  // Rows that are always present, appended after whatever the installer sends.
+  //
+  // Split this way on purpose. The overlay commands are feature-gated, so only
+  // the installer knows which apply and it passes them in the URL. These are
+  // static, so they live here — meaning editing the list needs nothing more
+  // than a page refresh, where a URL-driven list would need the scenes
+  // rebuilding to take effect.
+  const STATIC_ITEMS = ['concerts', 'socials', 'discord', 'x', 'info'];
+
+  // Presence, not truthiness: the installer sends an empty help_items when
+  // every gated feature is switched off, and `|| default` would resurrect them.
+  const GATED_ITEMS = (P.has('help_items') ? P.get('help_items') : 'np,clip,weeman,fine')
+    .split(',')
+    .map(s => s.trim())
+    // Drop anything static that an older installer URL still lists, so it
+    // does not appear twice or out of order.
+    .filter(k => CATALOG[k] && STATIC_ITEMS.indexOf(k) === -1);
+
+  const ITEMS = GATED_ITEMS.concat(STATIC_ITEMS);
+
+  const TICKER_H = 36;
+  const ROW_H    = 34;
+  const LABEL_H  = 24;
+  const GAP      = 10;
+  const PANEL_H  = 52 + ITEMS.length * ROW_H;
+
+  // ── Trigger ─────────────────────────────────────────────────────────────
+  let show = () => {};
+  let lastShownAt = 0;
+
+  function handleChatLine(line) {
+    if (!line.includes('PRIVMSG')) return;
+    const m = line.match(/PRIVMSG #\S+ :(.+)$/);
+    if (!m || !INFO_RE.test(m[1].trim())) return;
+
+    // Global cooldown, not per user: the card is the same for everyone, so a
+    // second viewer asking within the window is already being answered.
+    const now = Date.now();
+    if (now - lastShownAt < COOLDOWN_MS) return;
+    lastShownAt = now;
+    show();
+  }
+
+  (function connectChat() {
+    let retryMs = 2000;
+    let ws;
+
+    function open() {
+      ws = new WebSocket('wss://irc-ws.chat.twitch.tv');
+
+      ws.onopen = () => {
+        retryMs = 2000;
+        ws.send('CAP REQ :twitch.tv/tags');
+        ws.send('PASS SCHMOOPIIE');
+        ws.send('NICK justinfan' + Math.floor(Math.random() * 99999));
+        ws.send('JOIN #' + CHANNEL);
+      };
+
+      ws.onmessage = (ev) => {
+        ev.data.split('\r\n').filter(Boolean).forEach(line => {
+          if (line.startsWith('PING')) { ws.send('PONG :tmi.twitch.tv'); return; }
+          handleChatLine(line);
+        });
+      };
+
+      ws.onclose = () => {
+        setTimeout(open, retryMs);
+        retryMs = Math.min(retryMs * 2, 30000);
+      };
+      ws.onerror = () => { try { ws.close(); } catch (_) {} };
+    }
+
+    open();
+  })();
+
+  // ── View ────────────────────────────────────────────────────────────────
+  function HelpCard() {
+    const [visible, setVisible] = React.useState(false);
+    const timer = React.useRef(null);
+
+    React.useEffect(() => {
+      show = () => {
+        setVisible(true);
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = setTimeout(() => setVisible(false), VISIBLE_MS);
+      };
+      if (P.get('help_test') === '1') show();
+      return () => { if (timer.current) clearTimeout(timer.current); };
+    }, []);
+
+    // Clipped at the ticker's top edge so the panel is masked away as it drops
+    // rather than sliding across the chrome. On the Arranging scene the same
+    // panel simply sits at a lower z-index than the ticker, but that only works
+    // because both are drawn by one page. This is a separate browser source
+    // stacked above the scene chrome, and z-index does not cross sources, so
+    // the effect has to be produced by clipping instead. Doing it here rather
+    // than by reordering the OBS layers also means it is right on scenes that
+    // were built before this source existed, where place() leaves an existing
+    // item's order alone.
+    return e('div', { style: {
+      position: 'absolute', left: LEFT, right: RIGHT, bottom: TICKER_H,
+      height: LABEL_H + PANEL_H + GAP, overflow: 'hidden',
+      zIndex: 5, pointerEvents: 'none'
+    }},
+      e('div', { style: {
+        position: 'absolute', left: 0, right: 0, top: 0,
+        height: LABEL_H + PANEL_H,
+        // Closed state drops it by the panel height plus the gap, leaving the
+        // label handle resting flush on the ticker's top edge as a standing
+        // hint, with the panel itself clipped out of sight below.
+        transform: visible ? 'translateY(0)' : 'translateY(' + (PANEL_H + GAP) + 'px)',
+        transition: 'transform 450ms cubic-bezier(.2,.8,.2,1)'
+      }},
+        // Label handle, same as the Arranging info panel so the two read as one
+        // mechanism across scenes.
+        e('div', { style: {
+          position: 'absolute', left: 10, top: 0, height: LABEL_H,
+          padding: '0 12px',
+          background: '#06080a',
+          border: '1px solid ' + T.rule2,
+          borderLeft: '2px solid ' + T.accent,
+          boxShadow: '0 0 12px ' + T.accentGlow,
+          display: 'flex', alignItems: 'center', gap: 8,
+          fontFamily: T.mono, fontSize: 10, letterSpacing: '.28em',
+          color: T.ink
+        }},
+          e('span', { style: { width: 6, height: 6, background: T.accent, boxShadow: '0 0 8px ' + T.accentGlow } }),
+          e('span', null, '!INFO')
+        ),
+
+        e('div', {
+          className: 'ovl-chamfer',
+          style: {
+            position: 'absolute', left: 0, right: 0, top: LABEL_H, height: PANEL_H,
+            background: 'linear-gradient(180deg, ' + T.bg2 + ' 0%, ' + T.bg3 + ' 100%)',
+            border: '1px solid ' + T.rule2,
+            boxShadow: 'inset 0 1px 0 0 rgba(40,154,230,.18)',
+            padding: '14px 22px', boxSizing: 'border-box',
+            display: 'flex', flexDirection: 'column'
+          }
+        },
+          e('div', { style: {
+            fontFamily: T.mono, fontSize: 10, letterSpacing: '.32em', color: T.ink3,
+            marginBottom: 10
+          }}, 'CHAT COMMANDS'),
+
+          ITEMS.map(key => {
+            const item = CATALOG[key];
+            return e('div', { key: key, style: {
+              height: ROW_H, display: 'flex', alignItems: 'center', gap: 18,
+              borderTop: '1px solid ' + T.rule
+            }},
+              e('div', { style: {
+                fontFamily: T.mono, fontSize: 15, fontWeight: 600, letterSpacing: '.06em',
+                color: T.accent, minWidth: 220, flexShrink: 0
+              }}, item.cmd),
+              e('div', { style: {
+                fontFamily: T.sans, fontSize: 15, letterSpacing: '.01em', color: T.ink2,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
+              }}, item.desc)
+            );
+          })
+        )
+      )
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(e(HelpCard));
+})();
+</script>
+</body>
+</html>

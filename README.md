@@ -23,6 +23,8 @@ Extras layered on every scene:
 - **Now Playing** — a slide-out strip showing what's playing on Tidal / YouTube. Hidden by default; viewers reveal it with `!np` or `!playing` in chat.
 - **Fire Overlay** — triggered by the `!fine` chat command (costs 100 Ostis); plays a fire effect over whatever scene you're on.
 - **Clip Player** — paste a link to one of this channel's clips in chat and it plays in a panel (centered, or small in the top-left); mods can `!so <user>` to play another streamer's featured clip. Clips from other channels are ignored.
+- **WeeMan Avatars** — viewers type `!weeman` to send their own WeeMan walking along the bottom of the stream for 15 minutes, in their chat colour, with their chat messages in speech bubbles above it.
+- **Commands card** — `!info` slides up a card listing the chat commands that work on this scene. On 07 Arranging the same command shows the ON THE DESK piece card instead.
 - **Raid alerts** — a Twitch raid pops the usual toast + `media/raid.mp4` egg *and* fades in a fullscreen `media/WeeManRaid.mp4` backdrop behind them (black-keyed via an SVG luma filter, with audio).
 - **Mic mute indicator** — a small icon at the top-left (`media/mute.png` while the OBS *Mic/Aux* input is muted; `media/microphone.png` flashes for ~2s then fades out on unmute). Reads OBS state over obs-websocket.
 
@@ -72,6 +74,10 @@ These appear on the right when the script is selected. All have sensible default
 | **Twitch channel** | Channel login the Clip Player reads chat from — and the only channel whose clips play from viewer links. |
 | **Clip player** | Whether to add the Clip Player source at all. Uncheck and rebuild to remove it. |
 | **Clip player size** | *Large* (1280×720, centered) or *Small* (960×540, top-left). |
+| **WeeMan avatars** | Whether to add the WeeMan Avatars source. Uncheck and rebuild to remove it. |
+| **WeeMan: minutes on screen** | How long a summoned avatar lasts. Default 15. |
+| **WeeMan: show chat speech bubbles** | Whether a viewer's chat messages appear above their avatar. Untick to show names only. |
+| **Commands card** | Whether `!info` slides up a chat-commands card on the non-Arranging scenes. The card lists only the commands whose feature is enabled above. |
 | **Arranging: Piece / Game** | Boot-time defaults only — shown on the Arranging scene's "ON THE DESK" info card on first paint. Change live with `!piece` / `!from` in chat. |
 | **Arranging: total sprints / focus mins / break mins** | Pomodoro defaults for the Arranging scene's timer. Chat can override at runtime. |
 
@@ -160,12 +166,13 @@ The Phoenix backend (`ivgo-ex`) listens to chat and broadcasts to the overlays. 
 |---|---|
 | `!task <text>` | Append a task to the Arranging task list under your name. Text capped at 80 chars. 10s cooldown per user. |
 | `!done` | Tick off your oldest open task (green check). 10s cooldown per user. |
-| `!info` | Surface the "ON THE DESK" piece/game card for 10s. 30s global cooldown. |
+| `!info` | On **07 Arranging**, surfaces the "ON THE DESK" piece/game card for 10s. On every other scene, slides up a card listing the chat commands that work there. Either way, 10s on screen, 30s global cooldown. `!commands` is an alias for the command card. |
 | `!pomo` | Bot replies with current phase + time remaining + sprint x/y. 30s cooldown per user. |
 | `!progress` | Bot replies with current piece, game, and open task count. 60s cooldown per user. |
 | `!help` | Bot replies with a one-line command summary. 60s cooldown per user. |
 | `!np` / `!playing` | Slide the Now Playing strip down for 30s (shows current Tidal / YouTube / etc. track). |
 | `!fine` | Trigger the fire overlay. Costs 100 Ostis. |
+| `!weeman` | Sends your own WeeMan walking along the bottom of the stream for 15 minutes, tinted with your chat colour and captioned with your name. While it's out, anything you say appears in a speech bubble above it. Typing it again tops the timer back up. One per viewer, 20 on screen at once. |
 | *(paste a clip link)* | Plays the clip in a centered panel — **only** clips from this channel. Any other channel's clip is silently ignored. 60s cooldown per viewer, 15s between clips, same clip won't replay within 30 min. Mods and the broadcaster are exempt from the per-viewer cooldown and the replay block, so they can re-post a clip deliberately. |
 
 ### Mods + broadcaster only
@@ -183,6 +190,7 @@ The Phoenix backend (`ivgo-ex`) listens to chat and broadcasts to the overlays. 
 | `!task clear` | Wipe all tasks (spam escape hatch). |
 | `!task del <id>` | Remove a specific task by id (id shown in the mod-only LiveView control panel). |
 | `!clipstop` / `!stopclip` / `!skipclip` | Cut off the clip that's playing right now and empty the queue. Instant — video and audio both stop. |
+| `!weemanclear` | Send every WeeMan avatar home. They walk off rather than vanishing. |
 | `!so <user>` / `!shoutout <user>` | Play one of that streamer's own Featured Clips (picked at random) in the centered panel, styled amber. Falls back to their most-viewed clip if they haven't set a featured shelf; does nothing if they have no clips. Mods are exempt from the per-viewer clip cooldown. |
 
 > The timer does **not** auto-advance when it hits zero — phase changes only happen on explicit `!pomo start` / `stop` / `reset` / `next`. This is deliberate: keeps the chat in the loop on cadence.
@@ -242,6 +250,8 @@ For the now-playing source: `http://localhost:7779/scenes/09-now-playing.html?de
 | Cam Outline | Browser (`02-cam-outline.html?toasts=0`) | 0, 0 | 1920×1080 |
 | Chat | Browser (`02-chat.html?toasts=0`) | 0, 0 | 1920×1080 |
 | Now Playing | Browser (`http://localhost:7779/scenes/09-now-playing.html?debug=0`) | 0, 110 | 1920×1080 |
+| Commands Card | Browser (`13-help.html?toasts=0&egg_off=1&raid_bg_off=1&help_items=...`) | 0, 0 | 1920×1080 |
+| WeeMan Avatars | Browser (`12-weeman.html?toasts=0&egg_off=1&raid_bg_off=1&channel=...`) | 0, 0 | 1920×1080 |
 | Clip Player | Browser (`11-clip.html?toasts=0&egg_off=1&raid_bg_off=1&channel=...&clip_size=...`) | 0, 0 | 1920×1080 |
 | Fire Overlay | Browser (`10-fire.html?toasts=0&egg_off=1&raid_bg_off=1`) | 0, 0 | 1920×1080 |
 
@@ -251,6 +261,8 @@ For the now-playing source: `http://localhost:7779/scenes/09-now-playing.html?de
 | Host Camera | Video Capture | 320, 180 | 1280×720 |
 | Camera Overlay | Browser (`03-camera.html?host=...&hostRole=...`) | 0, 0 | 1920×1080 |
 | Now Playing | Browser | 0, 0 | 1920×1080 |
+| Commands Card | Browser | 0, 0 | 1920×1080 |
+| WeeMan Avatars | Browser | 0, 0 | 1920×1080 |
 | Clip Player | Browser | 0, 0 | 1920×1080 |
 | Fire Overlay | Browser | 0, 0 | 1920×1080 |
 
@@ -261,6 +273,8 @@ For the now-playing source: `http://localhost:7779/scenes/09-now-playing.html?de
 | Guest Camera | Video Capture | 1010, 72 | 904×858 |
 | Two-Cam Overlay | Browser (`05-two-cam.html?host=...&guest=...&topic=...`) | 0, 0 | 1920×1080 |
 | Now Playing | Browser | 0, 0 | 1920×1080 |
+| Commands Card | Browser | 0, 0 | 1920×1080 |
+| WeeMan Avatars | Browser | 0, 0 | 1920×1080 |
 | Clip Player | Browser | 0, 0 | 1920×1080 |
 | Fire Overlay | Browser | 0, 0 | 1920×1080 |
 
@@ -275,6 +289,8 @@ For the now-playing source: `http://localhost:7779/scenes/09-now-playing.html?de
 | Arranging Cam Outline | Browser (`07-cam-outline.html?toasts=0`) | 0, 0 | 1920×1080 |
 | Arranging Chat | Browser (`07-chat.html?toasts=0`) | 0, 0 | 1920×1080 |
 | Now Playing | Browser | 0, 0 | 1920×1080 |
+| Commands Card | Browser | 0, 0 | 1920×1080 |
+| WeeMan Avatars | Browser | 0, 0 | 1920×1080 |
 | Clip Player | Browser | 0, 0 | 1920×1080 |
 | Fire Overlay | Browser | 0, 0 | 1920×1080 |
 
@@ -284,6 +300,8 @@ For the now-playing source: `http://localhost:7779/scenes/09-now-playing.html?de
 | (Video — Media Source for 01 and 06) | Media Source — `media/buts.mkv` or `media/tetris.webm` | 0, 0 | 1920×1080 |
 | Scene overlay | Browser (`01-starting-soon.html?mins=5&secs=0` / `04-brb.html` / `06-ending.html`) | 0, 0 | 1920×1080 |
 | Now Playing | Browser | 0, 0 | 1920×1080 |
+| Commands Card | Browser | 0, 0 | 1920×1080 |
+| WeeMan Avatars | Browser | 0, 0 | 1920×1080 |
 | Clip Player | Browser | 0, 0 | 1920×1080 |
 | Fire Overlay | Browser | 0, 0 | 1920×1080 |
 
@@ -312,6 +330,45 @@ To re-download the BRB video from YouTube, see `tools/README.md` for the `yt-dlp
 ### Fire effect (Fire Overlay)
 
 The trigger is server-side: `!fine` chat command, costs 100 Ostis, broadcasts the `overlay.fire` event on Phoenix. Animation is `media/overlay/fire-alpha.webm` — a VP9 video with alpha channel and muxed crackle audio. Replace the file to change the look/sound. Default reveal length is 16s (one full audio play).
+
+### Commands card (`!info` off the Arranging scene)
+
+`scenes/13-help.html` — the `IVGO: Commands Card` source. `!info` slides a panel up from the ticker for 10 seconds listing the chat commands that work, then it drops back down. Same gesture, same `!INFO` label handle and same timing as the Arranging scene's info panel, so the two read as one mechanism across the pack.
+
+Added to **every scene except 07 Arranging**, which has its own `!info` that slides the ON THE DESK card up from the same spot — both at once would collide.
+
+**The overlay commands are listed only when they're switched on.** The installer builds the row list from your settings: `!np` appears only if the Now-Playing base URL is set, `!weeman` only if the avatars are enabled, clip links only if the clip player is on, and `!fine` only if a Socket URL is configured (no Phoenix backend means no Ostis). So it can't advertise one of ours that would do nothing.
+
+**`!concerts`, `!socials`, `!discord` and `!x` are answered by Nightbot**, not by this pack — nothing here handles them, they're listed because they work. There's no setting for them for the same reason. If one is renamed or dropped in Nightbot, update the list in `build_help` (`ivgo_obs_setup.lua`) and the `CATALOG` in `scenes/13-help.html` to match; nothing will catch the drift automatically.
+
+The always-present rows (`!concerts`, `!socials`, `!discord`, `!x`, `!info`) are `STATIC_ITEMS` in the page, so editing them only needs a page refresh. The feature-gated ones come from the installer via `help_items`, so changing those needs a scene rebuild. Wording for all of them lives in the `CATALOG` object at the top of the page — edit the wording there, and the installer's `help_items` decides which appear and in what order. Per-source overrides: `help_off=1`, `help_items=np,clip,weeman,fine,info`, `help_secs`, `help_cooldown`, `help_left` / `help_right` (panel insets; the default right inset clears a scene's chat panel).
+
+Preview it with `scenes/13-help.html?help_test=1`.
+
+Like the other chat overlays it reads chat directly rather than going through Phoenix, so it works with the backend offline.
+
+### WeeMan avatars
+
+`scenes/12-weeman.html` — the `IVGO: WeeMan Avatars` source, layered above the scene chrome so the cast walks along the top of the ticker like a ledge, but below the clip player and fire overlay so an alert always wins the foreground.
+
+A viewer types `!weeman` and their WeeMan walks on from the nearest edge, patrols the bottom of the screen for 15 minutes, then walks off and leaves. It's the existing `WeeMan` SVG from `ivgo-shared.js`, tinted with their Twitch chat colour (falling back to a hash of their name), so a given person is the same colour every stream. The name sits above in Courier New.
+
+**The speech bubbles are the point.** While your avatar is out, anything you say in chat appears above it for a few seconds. That's what makes the command worth spending on: it puts the viewer in the scene rather than only on the chat panel. Untick **WeeMan: show chat speech bubbles** if you'd rather show names only — it does put viewer text on the stream.
+
+The cast reacts to the rest of the overlay: follows, subs, gifts and cheers make everyone jump, and a raid sends them all home so they aren't wandering under the raid alert.
+
+Settings: **WeeMan avatars** (on/off), **WeeMan: minutes on screen**, **WeeMan: show chat speech bubbles**. Per-source overrides: `weeman_off=1`, `weeman_mins`, `weeman_max`, `weeman_bubbles=0`, `weeman_base` (px from the bottom, default 26 — lower than the ticker's 36 because the WeeMan artwork has empty space under its feet, so this stands them on the chrome rather than above it), `weeman_size`.
+
+The cast survives a source refresh — names, colours and expiry times are kept in `localStorage`, so a mid-stream refresh doesn't rob 20 people of time they paid for.
+
+To preview without live chat:
+
+```
+scenes/12-weeman.html?weeman_test=alice,bob,carol
+scenes/12-weeman.html?weeman_test=alice&weeman_test_say=hello
+```
+
+**Free to summon as it stands.** Charging Ostis needs `ivgo-ex`, which owns the balances — it would deduct and then broadcast `overlay.weeman` with `{user_name, colour, duration_ms}`, which this page already listens for. Same shape as `!fine` driving the fire overlay.
 
 ### Clip player
 
@@ -469,7 +526,9 @@ ivgo-overlays/
 │   ├── 08-keyboard-frame.html
 │   ├── 09-now-playing.html         # served by tools/now-playing-watch.ps1
 │   ├── 10-fire.html                # !fine reward overlay
-│   └── 11-clip.html                # centered clip player (chat links + !so)
+│   ├── 11-clip.html                # centered clip player (chat links + !so)
+│   ├── 12-weeman.html              # chat-summoned WeeMan avatars (!weeman)
+│   └── 13-help.html                # !info commands card (non-Arranging scenes)
 └── tools/
     ├── README.md                   # SMTC watch script docs
     ├── now-playing-watch.ps1       # SMTC poller + HTTP server (Windows PS 5.1)

@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>IVGO · 12 WeeMan Avatars</title>
+<meta name="viewport" content="width=1920"/>
+<style>
+  html,body{margin:0;padding:0;background:transparent;width:1920px;height:1080px;overflow:hidden}
+
+  /* Bubble pop. Short and springy so a fast talker's bubbles don't feel laggy. */
+  @keyframes wm-bubble-in {
+    0%   { opacity:0; transform:translateY(6px) scale(.9); }
+    70%  { opacity:1; transform:translateY(0)   scale(1.03); }
+    100% { opacity:1; transform:translateY(0)   scale(1); }
+  }
+  @keyframes wm-bubble-out { from{opacity:1} to{opacity:0} }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="../phoenix.min.js"></script>
+<script src="../ivgo-shared.js"></script>
+
+<script>
+(function () {
+  const { T, bus, WeeMan } = window.IVGO;
+  const e = React.createElement;
+
+  // Chat-summoned WeeMan avatars that walk along the bottom of the stream.
+  //
+  //   !weeman        summons yours for 15 minutes, or refreshes the timer if
+  //                  it is already out. One per viewer, ever.
+  //   !weemanclear   mods and broadcaster, sends everyone home.
+  //
+  // While your avatar is out, anything you say in chat appears in a speech
+  // bubble above it. That is the reason to buy one: it puts you in the scene
+  // rather than just on the chat panel.
+  //
+  // Avatars are tinted with the viewer's Twitch chat colour, falling back to
+  // the same name hash the chat panel uses, so a given person is the same
+  // colour every stream.
+  //
+  // Free to summon as it stands. Charging Ostis needs ivgo-ex, which owns the
+  // balances: it would deduct and then broadcast `overlay.weeman`, which this
+  // page already listens for, exactly like !fine drives the fire overlay.
+  //
+  // URL params:
+  //   weeman_off=1       disable on this source
+  //   channel=<login>    chat channel to read (default IVGO)
+  //   weeman_mins=15     how long an avatar lasts
+  //   weeman_max=20      concurrent avatar cap
+  //   weeman_bubbles=0   turn off speech bubbles
+  //   weeman_base=36     px from the bottom they walk on (default: ticker top)
+  //   weeman_size=64     avatar height in px
+
+  const P = new URLSearchParams(location.search);
+  if (P.get('weeman_off') === '1') return;
+
+  const CHANNEL   = (P.get('channel') || 'irishvideogameorchestra').toLowerCase();
+  const LIFE_MS   = (parseInt(P.get('weeman_mins') || '15', 10)) * 60 * 1000;
+  const MAX       = parseInt(P.get('weeman_max') || '20', 10);
+  const BUBBLES   = P.get('weeman_bubbles') !== '0';
+  // The WeeMan artwork sits in the upper four fifths of its viewBox, so about
+  // a fifth of the rendered height is empty space under the figure's feet.
+  // 26 rather than the ticker's 36 accounts for that gap and lands the feet on
+  // the top edge of the chrome.
+  const BASE      = parseInt(P.get('weeman_base') || '26', 10);
+  const SIZE      = parseInt(P.get('weeman_size') || '64', 10);
+
+  const STAGE_W     = 1920;
+  const MARGIN      = 24;                 // how close to the edge they turn
+  const BUBBLE_MS   = 6000;
+  const BUBBLE_MAX  = 80;                 // characters, then ellipsis
+  // Twitch caps usernames at 25 characters, so this never truncates a real
+  // name. It is only a guard against a nonsense display name.
+  const NAME_MAX    = 25;
+  const JUMP_MS     = 620;
+  const STORE_KEY   = 'ivgo_weemen_v1';
+
+  const SUMMON_RE = /^!weeman\b/i;
+  const CLEAR_RE  = /^!weeman(?:clear|s?\s+clear)\b/i;
+
+  // ── Roster ──────────────────────────────────────────────────────────────
+  // Plain records, keyed by lowercased login. The animation loop mutates x and
+  // writes transforms straight to the DOM, so React only re-renders when the
+  // cast changes or a bubble appears.
+  const roster = new Map();
+  let listeners = [];
+  let version = 0;
+  const changed = () => { version++; listeners.forEach(fn => fn(version)); };
+
+  function colourFor(name, tagColour) {
+    if (tagColour && /^#[0-9a-f]{6}$/i.test(tagColour)) return tagColour;
+    // Same hue-per-name idea as the chat panel, kept local so this page does
+    // not depend on a helper that is not exported.
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+    return 'hsl(' + h + ',70%,62%)';
+  }
+
+  function summon(key, displayName, tagColour, durationMs) {
+    const now = Date.now();
+    const existing = roster.get(key);
+
+    // Already out: top the timer back up rather than spawning a duplicate.
+    if (existing) {
+      existing.expiresAt = now + (durationMs || LIFE_MS);
+      existing.state = 'walking';
+      changed();
+      return;
+    }
+
+    if (roster.size >= MAX) {
+      console.log('[IVGO weeman] at capacity (' + MAX + '), ignoring ' + key);
+      return;
+    }
+
+    const fromLeft = Math.random() < 0.5;
+    roster.set(key, {
+      key: key,
+      // Stored in full and clamped at render time. Truncating here would bake
+      // the old limit into localStorage, so a raised cap would not reach any
+      // avatar that was already out.
+      name: String(displayName || key),
+      colour: colourFor(key, tagColour),
+      // Start just off the edge and walk on, rather than popping into frame.
+      x: fromLeft ? -SIZE : STAGE_W,
+      dir: fromLeft ? 1 : -1,
+      speed: 34 + Math.random() * 26,       // px/sec
+      phase: Math.random() * Math.PI * 2,   // desync the waddle
+      expiresAt: now + (durationMs || LIFE_MS),
+      state: 'walking',
+      jumpUntil: 0,
+      bubble: null,
+      node: null,
+      body: null
+    });
+    changed();
+    persist();
+  }
+
+  function sendHome(rec) {
+    if (rec.state === 'leaving') return;
+    rec.state = 'leaving';
+    // Leave by the nearer edge so nobody hikes the full width to exit.
+    rec.dir = rec.x < STAGE_W / 2 ? -1 : 1;
+    rec.bubble = null;
+    changed();
+  }
+
+  function jumpAll() {
+    const until = Date.now() + JUMP_MS;
+    roster.forEach(rec => { rec.jumpUntil = until; });
+  }
+
+  function say(key, text) {
+    if (!BUBBLES) return;
+    const rec = roster.get(key);
+    if (!rec || rec.state === 'leaving') return;
+    const clean = text.length > BUBBLE_MAX ? text.slice(0, BUBBLE_MAX - 1) + '…' : text;
+    rec.bubble = { text: clean, until: Date.now() + BUBBLE_MS };
+    changed();
+  }
+
+  // ── Persistence ─────────────────────────────────────────────────────────
+  // A source refresh would otherwise rob everyone of time they paid for. Only
+  // the facts worth keeping are stored; position and gait are re-rolled.
+  function persist() {
+    try {
+      const rows = [];
+      roster.forEach(rec => {
+        if (rec.state !== 'leaving') {
+          rows.push({ key: rec.key, name: rec.name, colour: rec.colour, expiresAt: rec.expiresAt });
+        }
+      });
+      localStorage.setItem(STORE_KEY, JSON.stringify(rows));
+    } catch (err) {
+      console.warn('[IVGO weeman] could not persist roster:', err);
+    }
+  }
+
+  function restore() {
+    let rows;
+    try {
+      rows = JSON.parse(localStorage.getItem(STORE_KEY) || '[]');
+    } catch (err) {
+      return;
+    }
+    if (!Array.isArray(rows)) return;
+
+    const now = Date.now();
+    rows.filter(r => r && r.expiresAt > now)
+        .slice(0, MAX)
+        .forEach(r => summon(r.key, r.name, r.colour, r.expiresAt - now));
+  }
+
+  // ── Animation ───────────────────────────────────────────────────────────
+  // One rAF loop for the whole cast, writing transforms directly. Position is
+  // never React state: 20 avatars re-rendering at 60fps would be pointless
+  // work for something no reconciler needs to know about.
+  let last = null;
+
+  function frame(ts) {
+    const dt = last == null ? 0 : Math.min((ts - last) / 1000, 0.1);
+    last = ts;
+    const now = Date.now();
+    let cast = false;
+
+    roster.forEach(rec => {
+      if (rec.state === 'walking' && now >= rec.expiresAt) sendHome(rec);
+
+      rec.x += rec.dir * rec.speed * dt;
+      rec.phase += dt * (rec.speed / 9);
+
+      if (rec.state === 'walking') {
+        // Turn at the margins, but only once fully on stage — otherwise an
+        // avatar entering from the left turns around before it arrives.
+        if (rec.dir > 0 && rec.x > STAGE_W - MARGIN - SIZE) rec.dir = -1;
+        if (rec.dir < 0 && rec.x < MARGIN) rec.dir = 1;
+      } else if (rec.x < -SIZE * 1.5 || rec.x > STAGE_W + SIZE * 0.5) {
+        roster.delete(rec.key);
+        cast = true;
+        return;
+      }
+
+      if (rec.bubble && now > rec.bubble.until) { rec.bubble = null; cast = true; }
+
+      if (rec.node) {
+        // Waddle: a bob and a matching tilt, both off the same phase.
+        let bob = Math.sin(rec.phase) * 3;
+        if (now < rec.jumpUntil) {
+          const p = 1 - (rec.jumpUntil - now) / JUMP_MS;   // 0..1
+          bob -= Math.sin(p * Math.PI) * 26;               // parabola
+        }
+        rec.node.style.transform = 'translate3d(' + rec.x.toFixed(1) + 'px,' + bob.toFixed(1) + 'px,0)';
+        if (rec.body) {
+          rec.body.style.transform =
+            'scaleX(' + rec.dir + ') rotate(' + (Math.sin(rec.phase) * 4).toFixed(2) + 'deg)';
+        }
+      }
+    });
+
+    if (cast) changed();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  // Keep the stored roster fresh so a refresh restores near-accurate timers.
+  setInterval(persist, 30000);
+
+  // ── Chat ────────────────────────────────────────────────────────────────
+  // Parsing is split from transport so the routing can be exercised without a
+  // live socket.
+  function handleChatLine(line) {
+    if (!line.includes('PRIVMSG')) return;
+
+    const tags = {};
+    if (line.startsWith('@')) {
+      line.slice(1, line.indexOf(' ')).split(';').forEach(t => {
+        const eq = t.indexOf('=');
+        tags[t.slice(0, eq)] = t.slice(eq + 1);
+      });
+    }
+    const m = line.match(/PRIVMSG #\S+ :(.+)$/);
+    if (!m) return;
+
+    const text   = m[1].trim();
+    const badges = tags['badges'] || '';
+    const isMod  = tags['mod'] === '1' || badges.indexOf('broadcaster/') !== -1;
+    const name   = tags['display-name'] || 'viewer';
+    const key    = name.toLowerCase();
+
+    if (isMod && CLEAR_RE.test(text)) {
+      roster.forEach(sendHome);
+      console.log('[IVGO weeman] cleared by mod');
+      return;
+    }
+
+    if (SUMMON_RE.test(text)) {
+      summon(key, name, tags['color']);
+      return;
+    }
+
+    // Anything else from someone who is out becomes a speech bubble.
+    say(key, text);
+  }
+
+  (function connectChat() {
+    let retryMs = 2000;
+    let ws;
+
+    function open() {
+      ws = new WebSocket('wss://irc-ws.chat.twitch.tv');
+
+      ws.onopen = () => {
+        retryMs = 2000;
+        ws.send('CAP REQ :twitch.tv/tags');
+        ws.send('PASS SCHMOOPIIE');
+        ws.send('NICK justinfan' + Math.floor(Math.random() * 99999));
+        ws.send('JOIN #' + CHANNEL);
+      };
+
+      ws.onmessage = (ev) => {
+        ev.data.split('\r\n').filter(Boolean).forEach(line => {
+          if (line.startsWith('PING')) { ws.send('PONG :tmi.twitch.tv'); return; }
+          handleChatLine(line);
+        });
+      };
+
+      ws.onclose = () => {
+        setTimeout(open, retryMs);
+        retryMs = Math.min(retryMs * 2, 30000);
+      };
+      ws.onerror = () => { try { ws.close(); } catch (_) {} };
+    }
+
+    open();
+  })();
+
+  // ── Events ──────────────────────────────────────────────────────────────
+  // The cast reacts to the same alerts the rest of the overlay shows.
+  bus.on('channel.follow',            jumpAll);
+  bus.on('channel.subscribe',         jumpAll);
+  bus.on('channel.subscription.gift', jumpAll);
+  bus.on('channel.cheer',             jumpAll);
+
+  // A raid takes over the screen, so the cast clears out rather than walking
+  // around underneath it.
+  bus.on('channel.raid', () => roster.forEach(sendHome));
+
+  // The paid path, once ivgo-ex deducts Ostis and broadcasts.
+  bus.on('overlay.weeman', (p) => {
+    const name = p && (p.user_name || p.user_login);
+    if (!name) return;
+    summon(String(name).toLowerCase(), name, p.colour || p.color, p.duration_ms);
+  });
+
+  // ── View ────────────────────────────────────────────────────────────────
+  function Avatar({ rec }) {
+    const nodeRef = React.useRef(null);
+    const bodyRef = React.useRef(null);
+
+    React.useEffect(() => {
+      rec.node = nodeRef.current;
+      rec.body = bodyRef.current;
+      return () => { rec.node = null; rec.body = null; };
+    }, [rec]);
+
+    return e('div', {
+      ref: nodeRef,
+      style: {
+        position: 'absolute', bottom: BASE, left: 0,
+        width: SIZE, display: 'flex', flexDirection: 'column', alignItems: 'center',
+        willChange: 'transform', pointerEvents: 'none'
+      }
+    },
+      // In normal flow, not absolutely positioned: the column is centred and
+      // bottom-anchored, so the bubble centres itself and grows upward. It also
+      // leaves `transform` free for the pop animation, which would otherwise
+      // overwrite a translateX(-50%) used for centring.
+      rec.bubble && e('div', {
+        style: {
+          maxWidth: 260, width: 'max-content', marginBottom: 6,
+          background: 'rgba(6,8,10,.92)', border: '1px solid ' + T.rule2,
+          padding: '6px 10px',
+          fontFamily: '"Courier New", Courier, monospace', fontSize: 13, lineHeight: 1.3,
+          color: T.ink, textAlign: 'center', whiteSpace: 'normal', wordBreak: 'break-word',
+          animation: 'wm-bubble-in 220ms cubic-bezier(.2,.8,.2,1) both',
+          boxShadow: '0 4px 18px rgba(0,0,0,.5)'
+        }
+      }, rec.bubble.text),
+
+      // White with a black outline, not the viewer's colour: a mid-blue or any
+      // other dark chat colour is unreadable against gameplay. Identity still
+      // reads off the avatar itself, which stays tinted.
+      e('div', {
+        style: {
+          fontFamily: '"Courier New", Courier, monospace',
+          fontSize: 15, fontWeight: 700, letterSpacing: '.08em',
+          color: '#fff', whiteSpace: 'nowrap', marginBottom: 2,
+          WebkitTextStroke: '1px #000',
+          // Stroke alone thins the glyphs, so a ring of hard shadows fills the
+          // outline back out and a soft one lifts it off a busy background.
+          textShadow: '1px 1px 0 #000, -1px 1px 0 #000, 1px -1px 0 #000, -1px -1px 0 #000, 0 0 8px rgba(0,0,0,.9)'
+        }
+      }, rec.name.slice(0, NAME_MAX)),
+
+      e('div', { ref: bodyRef, style: { willChange: 'transform' } },
+        e(WeeMan, { size: SIZE, color: rec.colour })
+      )
+    );
+  }
+
+  function Stage() {
+    const [, setV] = React.useState(0);
+
+    React.useEffect(() => {
+      const fn = v => setV(v);
+      listeners.push(fn);
+      restore();
+      return () => { listeners = listeners.filter(l => l !== fn); };
+    }, []);
+
+    const cast = [];
+    roster.forEach(rec => cast.push(rec));
+
+    return e('div', { style: { position: 'absolute', inset: 0, pointerEvents: 'none' } },
+      cast.map(rec => e(Avatar, { key: rec.key, rec: rec }))
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(e(Stage));
+
+  // Preview hooks, for checking the look without live chat:
+  //   ?weeman_test=name1,name2   summon a cast, already spread across the stage
+  //   &weeman_test_say=hello     give each of them a speech bubble
+  // Spread rather than entering from the edges, so the preview shows the
+  // steady state instead of several seconds of empty screen.
+  const test = P.get('weeman_test');
+  if (test) {
+    const names = test.split(',').map(s => s.trim()).filter(Boolean);
+    const gap = (STAGE_W - 320) / Math.max(names.length, 1);
+
+    names.forEach((n, i) => {
+      const key = n.toLowerCase();
+      summon(key, n);
+      const rec = roster.get(key);
+      if (!rec) return;
+      rec.x = 160 + i * gap;
+      rec.dir = i % 2 ? -1 : 1;
+      if (P.get('weeman_test_say')) {
+        rec.bubble = { text: P.get('weeman_test_say'), until: Date.now() + 3600000 };
+      }
+    });
+    changed();
+  }
+})();
+</script>
+</body>
+</html>

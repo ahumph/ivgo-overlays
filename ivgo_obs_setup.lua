@@ -425,24 +425,33 @@ end
 --
 -- Re-applied to existing sources on every rebuild, since make_browser's update
 -- path only touches the URL.
-local function configure_clip_source(src)
+--
+-- Shared by every chat-driven source that holds live state. Also forces a
+-- fresh page load on each rebuild: OBS only reloads a browser source when its
+-- URL changes, and these deliberately have restart_when_active off, so an HTML
+-- edit with no URL change would otherwise keep serving the cached old page and
+-- "Create / Refresh Scenes" would appear to do nothing.
+local function configure_stateful_source(src)
     local d = obs.obs_source_get_settings(src)
-    obs.obs_data_set_bool(d, "reroute_audio",       true)
     obs.obs_data_set_bool(d, "shutdown",            false)
     obs.obs_data_set_bool(d, "restart_when_active", false)
     obs.obs_source_update(src, d)
     obs.obs_data_release(d)
-    obs.obs_source_set_monitoring_type(src, obs.OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT)
 
-    -- Force a fresh page load on every rebuild. OBS only reloads a browser
-    -- source when its URL changes, and this source deliberately has
-    -- restart_when_active off — so an edit to 11-clip.html that doesn't also
-    -- change a URL param would otherwise keep serving the cached old page
-    -- indefinitely, and "Create / Refresh Scenes" would appear to do nothing.
     local ph = obs.obs_source_get_proc_handler(src)
     local cd = obs.calldata_create()
     obs.proc_handler_call(ph, "refreshnocache", cd)
     obs.calldata_destroy(cd)
+end
+
+local function configure_clip_source(src)
+    configure_stateful_source(src)
+
+    local d = obs.obs_source_get_settings(src)
+    obs.obs_data_set_bool(d, "reroute_audio", true)
+    obs.obs_source_update(src, d)
+    obs.obs_data_release(d)
+    obs.obs_source_set_monitoring_type(src, obs.OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT)
 end
 
 local function build_clip(scene, base, socket_url)
@@ -461,6 +470,78 @@ local function build_clip(scene, base, socket_url)
     local src = make_browser("IVGO: Clip Player", append_socket_url(url, socket_url))
     if src then
         configure_clip_source(src)
+        place(scene, src, 0, 0, 1920, 1080)
+        obs.obs_source_release(src)
+    end
+end
+
+-- WeeMan avatars (chat !weeman): viewer-summoned WeeMen walking along the
+-- bottom of the stream for 15 minutes, tinted with the viewer's chat colour,
+-- with their chat messages appearing in speech bubbles above them.
+--
+-- Layered above the scene chrome so they walk on top of the ticker rather than
+-- behind it, but below the clip player and fire overlay so an alert always
+-- wins the foreground.
+--
+-- Stateful for the same reasons as the clip player: an IRC connection plus the
+-- current cast and their timers.
+local function build_weeman(scene, base, socket_url)
+    if not settings_ref then return end
+    if not obs.obs_data_get_bool(settings_ref, "weeman_avatars") then return end
+
+    local channel = obs.obs_data_get_string(settings_ref, "twitch_channel")
+    local mins    = obs.obs_data_get_int(settings_ref, "weeman_mins")
+    local url = base .. "/12-weeman.html?toasts=0&egg_off=1&raid_bg_off=1"
+    if channel and channel ~= "" then
+        url = url .. "&channel=" .. string.lower(channel)
+    end
+    if mins and mins > 0 then
+        url = url .. "&weeman_mins=" .. tostring(mins)
+    end
+    if not obs.obs_data_get_bool(settings_ref, "weeman_bubbles") then
+        url = url .. "&weeman_bubbles=0"
+    end
+
+    local src = make_browser("IVGO: WeeMan Avatars", append_socket_url(url, socket_url))
+    if src then
+        configure_stateful_source(src)
+        place(scene, src, 0, 0, 1920, 1080)
+        obs.obs_source_release(src)
+    end
+end
+
+-- !info for every scene except 07 Arranging, which has its own: there the
+-- command slides the ON THE DESK piece card up, driven by ivgo-ex. This is the
+-- same gesture and label handle, listing the chat commands that work on this
+-- scene instead. Adding it to Arranging would slide two panels up at once.
+--
+-- The row list is built from the features that are actually switched on, so
+-- the card never advertises a command that would do nothing.
+local function build_help(scene, base, socket_url, np_base)
+    if not settings_ref then return end
+    if not obs.obs_data_get_bool(settings_ref, "help_card") then return end
+
+    local items = {}
+    if np_base and np_base ~= "" then table.insert(items, "np") end
+    if obs.obs_data_get_bool(settings_ref, "clip_player") then table.insert(items, "clip") end
+    if obs.obs_data_get_bool(settings_ref, "weeman_avatars") then table.insert(items, "weeman") end
+    -- !fine costs Ostis, which only exists when the Phoenix backend is wired up.
+    if socket_url and socket_url ~= "" then table.insert(items, "fine") end
+    -- Only the feature-gated rows go in the URL. The always-present ones
+    -- (!concerts, !socials, !discord, !x, !info — answered by Nightbot, or by
+    -- the card itself) are STATIC_ITEMS inside 13-help.html, so editing them
+    -- needs a page refresh rather than a scene rebuild.
+
+    local channel = obs.obs_data_get_string(settings_ref, "twitch_channel")
+    local url = base .. "/13-help.html?toasts=0&egg_off=1&raid_bg_off=1"
+    url = url .. "&help_items=" .. table.concat(items, ",")
+    if channel and channel ~= "" then
+        url = url .. "&channel=" .. string.lower(channel)
+    end
+
+    local src = make_browser("IVGO: Commands Card", append_socket_url(url, socket_url))
+    if src then
+        configure_stateful_source(src)
         place(scene, src, 0, 0, 1920, 1080)
         obs.obs_source_release(src)
     end
@@ -503,6 +584,8 @@ local function build_starting_soon(base, countdown_mins, socket_url, np_base)
         obs.obs_source_release(src)
     end
     build_now_playing(scene, np_base)
+    build_help(scene, base, socket_url, np_base)
+    build_weeman(scene, base, socket_url)
     build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
     obs.obs_source_release(scene_src)
@@ -552,6 +635,8 @@ local function build_game(base, socket_url, np_base)
     -- 02 Game's cam PiP sits top-right where the !PLAYING label normally
     -- lives — shift the now-playing source down 110px so the label clears it.
     build_now_playing(scene, np_base, 110)
+    build_help(scene, base, socket_url, np_base)
+    build_weeman(scene, base, socket_url)
     build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
     obs.obs_source_release(scene_src)
@@ -579,6 +664,8 @@ local function build_camera(base, host, host_role, socket_url, np_base)
     end
 
     build_now_playing(scene, np_base)
+    build_help(scene, base, socket_url, np_base)
+    build_weeman(scene, base, socket_url)
     build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
     obs.obs_source_release(scene_src)
@@ -593,6 +680,8 @@ local function build_brb(base, socket_url, np_base)
         obs.obs_source_release(src)
     end
     build_now_playing(scene, np_base)
+    build_help(scene, base, socket_url, np_base)
+    build_weeman(scene, base, socket_url)
     build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
     obs.obs_source_release(scene_src)
@@ -632,6 +721,8 @@ local function build_two_cam(base, host, host_role, guest, g_role, topic, socket
     end
 
     build_now_playing(scene, np_base)
+    build_help(scene, base, socket_url, np_base)
+    build_weeman(scene, base, socket_url)
     build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
     obs.obs_source_release(scene_src)
@@ -655,6 +746,8 @@ local function build_ending(base, socket_url, np_base)
         obs.obs_source_release(src)
     end
     build_now_playing(scene, np_base)
+    build_help(scene, base, socket_url, np_base)
+    build_weeman(scene, base, socket_url)
     build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
     obs.obs_source_release(scene_src)
@@ -775,6 +868,9 @@ local function build_arranging(base, piece, collection, sprints_total, focus_min
     end
 
     build_now_playing(scene, np_base)
+    -- No build_help here on purpose: this scene's own !info slides the ON THE
+    -- DESK card up from the same spot, so the two would move at once.
+    build_weeman(scene, base, socket_url)
     build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
     obs.obs_source_release(scene_src)
@@ -1021,6 +1117,10 @@ function script_defaults(settings)
     obs.obs_data_set_default_string(settings, "twitch_channel", "irishvideogameorchestra")
     obs.obs_data_set_default_bool  (settings, "clip_player", true)
     obs.obs_data_set_default_string(settings, "clip_size", "large")
+    obs.obs_data_set_default_bool  (settings, "weeman_avatars", true)
+    obs.obs_data_set_default_bool  (settings, "weeman_bubbles", true)
+    obs.obs_data_set_default_int   (settings, "weeman_mins", 15)
+    obs.obs_data_set_default_bool  (settings, "help_card", true)
 
     obs.obs_data_set_default_string(settings, "arr_piece",         "AERITH'S SUITE")
     obs.obs_data_set_default_string(settings, "arr_collection",    "FINAL FANTASY VII REBIRTH")
@@ -1086,6 +1186,21 @@ function script_properties()
     obs.obs_property_list_add_string(clip_size, "Small — 960x540, top-left",      "small")
     obs.obs_properties_add_text(props, "_clip_size_hint",
         "Large covers the middle of the canvas; small tucks under the header bar in the top-left corner so gameplay stays readable. Rebuild scenes after changing.",
+        obs.OBS_TEXT_INFO)
+
+    obs.obs_properties_add_bool(props, "weeman_avatars", "WeeMan avatars (chat !weeman)")
+    obs.obs_properties_add_text(props, "_weeman_hint",
+        "Viewers type !weeman to send a WeeMan walking along the bottom of the stream, tinted with their chat colour and captioned with their name. One each, at most 20 at once. Mods clear them with !weemanclear.",
+        obs.OBS_TEXT_INFO)
+    obs.obs_properties_add_int(props, "weeman_mins", "WeeMan: minutes on screen", 1, 120, 1)
+    obs.obs_properties_add_bool(props, "weeman_bubbles", "WeeMan: show chat speech bubbles")
+    obs.obs_properties_add_bool(props, "help_card", "Commands card (chat !info)")
+    obs.obs_properties_add_text(props, "_help_card_hint",
+        "Viewers type !info to slide up a card listing the chat commands that work, the same way !info works on the Arranging scene. Added to every scene except Arranging, which has its own !info. Only lists commands whose feature is switched on above.",
+        obs.OBS_TEXT_INFO)
+
+    obs.obs_properties_add_text(props, "_weeman_bubbles_hint",
+        "While a viewer's WeeMan is out, what they say in chat appears in a speech bubble above it. This puts viewer text on your stream, so untick it if you would rather only show names.",
         obs.OBS_TEXT_INFO)
 
     obs.obs_properties_add_text(props, "arr_piece",         "Arranging: Piece (boot default only — change with !piece in chat)",      obs.OBS_TEXT_DEFAULT)
