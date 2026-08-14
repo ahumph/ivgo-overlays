@@ -6,7 +6,7 @@
 
 // Upcoming concerts — edit this list to update all scenes at once.
 const EVENTS = [
-  'THE ADVENTURE CONTINUES · HELIX DUBLIN · 01.08.2026',
+  'THE ADVENTURE CONTINUES DLC · WATERFRONT STUDIO · BELFAST CULTURE NIGHT · 18.09.2026',
 ];
 
 const SOCIAL = [
