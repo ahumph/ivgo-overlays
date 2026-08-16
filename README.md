@@ -403,12 +403,12 @@ The hotkey works by reloading the Clip Player source, which is blunt but needs n
 
 An interrupted clip is never resumed, by either route.
 
-There are two more triggers, both already wired on the overlay side but **dormant until `ivgo-ex` broadcasts them** (see below):
+There are two more triggers, both live end to end — the overlay side and the `ivgo-ex` broadcasts it depends on (see below):
 
 - **Twitch's native `/shoutout` button** — plays the shouted-at streamer's featured clip, same as `!so`.
 - **Starting a raid** — when *we* raid someone, plays the channel we're sending everyone to, labelled `RAIDING · <CHANNEL>` in red. This one preempts: it clears the queue and cuts off anything playing, because the raid fires on its own countdown and won't wait. An *incoming* raid never plays a clip — it pulls the panel instead, and shouting the raider out is the way to show their clip.
 
-#### What ivgo-ex needs to send
+#### How ivgo-ex sends these
 
 Neither is detectable client-side. Twitch documents no shoutout `msg-id` for `USERNOTICE` or `NOTICE`, so an anonymous IRC connection cannot see a `/shoutout` at all, and an outgoing raid produces no chat message either. Both are EventSub-only, and EventSub needs a user token — which lives in `ivgo-ex`, where the follow/sub/raid pipeline already runs.
 
@@ -417,11 +417,11 @@ Neither is detectable client-side. Twitch documents no shoutout `msg-id` for `US
 | `channel.shoutout.create` | `broadcaster_user_id` + `moderator_user_id` = IVGO | `moderator:read:shoutouts` |
 | `channel.raid` (outgoing) | `from_broadcaster_user_id` = IVGO | none |
 
-Re-broadcast both on `overlay:events` under their EventSub names, with the event body intact — the overlay reads `to_broadcaster_user_login` from each. Note `channel.raid` is likely already subscribed with `to_broadcaster_user_id` for incoming raids; outgoing needs a **second** subscription with the `from_` condition.
+Both are re-broadcast on `overlay:events` under their EventSub names, with the event body intact — the overlay reads `to_broadcaster_user_login` from each. `channel.raid` carries two separate subscriptions in `ivgo-ex` — `to_broadcaster_user_id` for incoming, `from_broadcaster_user_id` for outgoing — since both directions arrive under the same event name and need telling apart by payload, not subscription.
 
-New event names must also be added to the allowlist in `ivgo-shared.js` (the `_channel.on(type, …)` array) — an event not named there never reaches `bus.on()` listeners. `channel.shoutout.create` is already in it.
+Both event names are in the allowlist in `ivgo-shared.js` (the `_channel.on(type, …)` array) — an event not named there never reaches `bus.on()` listeners.
 
-Because both raid directions arrive on the same event name, the overlay branches on the payload: `from_broadcaster_user_login` matching our channel means outgoing. The raid alerts (toast, egg, WeeMan backdrop) are gated the same way, so they only fire for a raid arriving — a payload with no `from_` field counts as incoming, so nothing changes until those subscriptions exist.
+Because both raid directions arrive on the same event name, the overlay branches on the payload: `from_broadcaster_user_login` matching our channel means outgoing. The raid alerts (toast, egg, WeeMan backdrop) are gated the same way, so they only fire for a raid arriving — a payload with no `from_` field counts as incoming.
 
 To preview the panel without live chat, open the page in any browser with a test param:
 
@@ -553,7 +553,7 @@ Things to be aware of when hosting:
 - Live chat events come from a Phoenix backend (`ivgo-ex`, separate repo) over a WebSocket.
 - Now Playing reads local Windows SMTC via a PowerShell script that serves both the JSON state and the overlay HTML over `http://localhost:7779`.
 - The Fire Overlay listens to `overlay.fire` on the Phoenix `overlay:events` channel — wired in `ivgo-shared.js`.
-- The Clip Player is the one chat feature that doesn't go through Phoenix: it reads chat over its own anonymous Twitch IRC socket and resolves clips to signed MP4s via Twitch GQL, so it works with the backend offline. Its native-`/shoutout` and raid-out triggers are the exception — those are EventSub-only and need `ivgo-ex` to broadcast them.
+- The Clip Player is the one chat feature that doesn't go through Phoenix: it reads chat over its own anonymous Twitch IRC socket and resolves clips to signed MP4s via Twitch GQL, so it works with the backend offline. Its native-`/shoutout` and raid-out triggers are the exception — those are EventSub-only, broadcast by `ivgo-ex`.
 - `channel.raid` covers raids in both directions. Anything reacting to it should check `from_broadcaster_user_login` against our channel; alerts are a welcome and must not fire when we raid out.
 - Every page that connects to the bus mounts toasts, the video egg and the raid backdrop (the auto-wire block in `ivgo-shared.js`). Full-canvas overlay sources stacked on top of a scene must therefore pass `toasts=0&egg_off=1&raid_bg_off=1`, or alerts fire twice with doubled audio.
 - Animations use the modern CSS `translate` property; requires Chromium 104+. OBS 28+ satisfies this.
