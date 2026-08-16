@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>IVGO · 14 Card Pull</title>
+<meta name="viewport" content="width=1920"/>
+<style>
+  html,body{margin:0;padding:0;background:transparent;width:1920px;height:1080px;overflow:hidden}
+
+  /* Container pop — the whole card rises into place bottom-left. */
+  @keyframes cp-pop-in {
+    0%   { transform: translateY(24px) scale(.92); opacity:0; }
+    65%  { transform: translateY(0) scale(1.03); opacity:1; }
+    100% { transform: translateY(0) scale(1); opacity:1; }
+  }
+  @keyframes cp-pop-out { from{transform:translateY(0) scale(1); opacity:1} to{transform:translateY(16px) scale(.96); opacity:0} }
+
+  /* Flip — back (WeeMan) rotates away, front (the card) rotates in. Both
+     faces share one 3D container; only the transform on the container
+     itself changes, so the two faces stay locked together mid-flip. */
+  @keyframes cp-flip {
+    from { transform: rotateY(0deg); }
+    to   { transform: rotateY(180deg); }
+  }
+
+  /* Secret Rare foil sheen on the badge — the one place this scene spends
+     motion on a rarity treatment, matching the admin frame prototype. */
+  @keyframes cp-foil { 0%,100%{ background-position:0% 50% } 50%{ background-position:100% 50% } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cp-card, .cp-badge[data-rarity="S"] { animation-duration: .01ms !important; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="../phoenix.min.js"></script>
+<script src="../ivgo-shared.js"></script>
+
+<script>
+(function () {
+  const { T, bus, WeeMan } = window.IVGO;
+  const e = React.createElement;
+
+  // Listens for `card.pull` on the Phoenix overlay:events channel (ivgo-ex
+  // Trading Cards feature, Phase 2). Pops bottom-left as a WeeMan-branded
+  // card back, flips to reveal the pulled card, holds, then dismisses.
+  //
+  // Payload shape (from ivgo-ex — see
+  // docs/superpowers/specs/2026-08-16-trading-cards-design.md):
+  //   {
+  //     user_name: string,
+  //     duplicate: boolean,
+  //     card: {
+  //       name: string,
+  //       category: "instrument" | "franchise" | "setlist" | "game",
+  //       set_name: string,
+  //       position: number,        // 1-based index within the set
+  //       total: number,           // card count in the set
+  //       rarity_code: string,     // single letter, e.g. "C" | "U" | "R" | "X" | "S"
+  //       rarity_label: string,
+  //       art_url: string | null,  // null for Concert Setlists cards today —
+  //                                // see the TODO below the RARITY map.
+  //       flavour_text: string | null,
+  //     }
+  //   }
+
+  const HOLD_MS       = 6000;   // Total time the front face stays visible.
+  const FLIP_DELAY_MS = 900;    // Back shown this long before flipping.
+  const FLIP_MS       = 700;
+  const POP_OUT_MS     = 400;
+
+  // Rarity accents mirror the admin frame prototype exactly, so a card
+  // reads the same way in the dashboard and on stream.
+  const RARITY = {
+    C: { color: '#7d8590', label: 'Common' },
+    U: { color: T.accent,  label: 'Uncommon' },     // T.accent === #289ae6, the site's own brand blue
+    R: { color: '#22c3a6', label: 'Rare' },
+    X: { color: '#a855f7', label: 'Ultra Rare' },
+    S: { color: '#f5c451', color2: '#ffb347', label: 'Secret Rare' },
+  };
+
+  function rarityOf(code) {
+    return RARITY[code] || RARITY.C;
+  }
+
+  // TODO(Phase 2/3): Concert Setlists cards have no art_url of their own —
+  // per the design spec they compose the matching Franchise card's art
+  // plus Piece.game_title/era/title/composer/arranger text instead. This
+  // scene renders those the same as any other card missing art (a rarity-
+  // tinted placeholder) until that composition payload/logic exists.
+
+  function CardFace({ card, isBack }) {
+    const r = rarityOf(card.rarity_code);
+
+    if (isBack) {
+      return e('div', {
+        className: 'cp-face',
+        style: faceStyle(true, r),
+      },
+        e(WeeMan, { size: 96, color: T.ink3 }),
+        e('div', { style: { marginTop: 14, fontFamily: T.mono, fontSize: 11, letterSpacing: '.24em', color: T.ink3 } }, 'IVGO CARDS')
+      );
+    }
+
+    return e('div', { className: 'cp-face', style: faceStyle(false, r) },
+      e('div', { style: { display: 'flex', flexDirection: 'column', height: '100%' } },
+        e('div', {
+          className: 'cp-badge', 'data-rarity': card.rarity_code,
+          style: badgeStyle(r),
+        }, card.rarity_code),
+        e('div', { style: { fontFamily: T.mono, fontSize: 10, letterSpacing: '.16em', textTransform: 'uppercase', color: T.ink3, padding: '14px 16px 0' } }, categoryLabel(card.category)),
+        e('div', { style: { fontFamily: T.display, fontWeight: 900, fontSize: 26, lineHeight: 1.02, color: T.ink, padding: '4px 16px 10px', textWrap: 'balance' } }, card.name),
+        e('div', { style: artWindowStyle(card, r) },
+          !card.art_url && e('div', { style: { fontFamily: T.display, fontWeight: 900, fontSize: 64, color: r.color, opacity: .8 } }, card.name.charAt(0))
+        ),
+        card.flavour_text && e('p', {
+          style: { fontFamily: 'Georgia, "Times New Roman", serif', fontStyle: 'italic', fontSize: 12, lineHeight: 1.35, color: T.ink3, margin: '10px 16px 0' }
+        }, card.flavour_text),
+        e('div', {
+          style: {
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            marginTop: 10, padding: '10px 16px 14px', borderTop: `1px solid ${T.rule}`,
+            fontFamily: T.mono, fontSize: 11, color: T.ink3,
+          }
+        },
+          e('span', null, `${card.position}`, e('span', { style: { opacity: .5 } }, `/${card.total}`)),
+          e('span', { style: { color: T.ink2 } }, r.label)
+        )
+      )
+    );
+  }
+
+  function faceStyle(isBack, r) {
+    return {
+      position: 'absolute', inset: 0,
+      backfaceVisibility: 'hidden',
+      transform: isBack ? 'rotateY(0deg)' : 'rotateY(180deg)',
+      display: 'flex', flexDirection: 'column', alignItems: isBack ? 'center' : 'stretch',
+      justifyContent: isBack ? 'center' : 'flex-start',
+      background: T.bg2,
+      border: `1px solid ${isBack ? T.rule2 : r.color}`,
+    };
+  }
+
+  function badgeStyle(r) {
+    const style = {
+      position: 'absolute', top: 10, right: 10, width: 28, height: 28, borderRadius: '50%',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontFamily: T.mono, fontSize: 13, fontWeight: 700,
+      background: T.bg, border: `1px solid ${r.color}`, color: r.color,
+    };
+    if (r.color2) {
+      style.background = `linear-gradient(135deg, ${r.color}, ${r.color2})`;
+      style.backgroundSize = '220% 220%';
+      style.color = T.bg;
+      style.border = 'none';
+      style.animation = 'cp-foil 4s ease-in-out infinite';
+    }
+    return style;
+  }
+
+  function artWindowStyle(card, r) {
+    return {
+      flex: 1, margin: '0 16px', minHeight: 0,
+      background: card.art_url
+        ? `center/cover no-repeat url(${card.art_url})`
+        : `radial-gradient(120% 90% at 30% 15%, ${r.color}33, transparent 60%), ${T.bg3}`,
+      border: `1px solid ${T.rule}`,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+    };
+  }
+
+  function categoryLabel(category) {
+    return { instrument: 'Instruments', franchise: 'Franchises', setlist: 'Concert Setlists', game: 'Streamed Games' }[category] || category;
+  }
+
+  function CardPullOverlay() {
+    // phase: null | 'in' | 'out'
+    const [data, setData]   = React.useState(null);
+    const [phase, setPhase] = React.useState(null);
+    const [flipped, setFlipped] = React.useState(false);
+
+    React.useEffect(() => {
+      bus.on('card.pull', (payload) => {
+        if (!payload || !payload.card) return;
+        setData({ ...payload, key: Date.now() });
+        setFlipped(false);
+        setPhase('in');
+      });
+    }, []);
+
+    React.useEffect(() => {
+      if (!data) return;
+
+      const tFlip    = setTimeout(() => setFlipped(true), FLIP_DELAY_MS);
+      const tFade    = setTimeout(() => setPhase('out'), HOLD_MS - POP_OUT_MS);
+      const tUnmount = setTimeout(() => { setPhase(null); setData(null); }, HOLD_MS);
+
+      return () => { clearTimeout(tFlip); clearTimeout(tFade); clearTimeout(tUnmount); };
+    }, [data]);
+
+    if (!data || !phase) return null;
+
+    const CARD_W = 300, CARD_H = 420;
+
+    return e('div', {
+      style: {
+        position: 'absolute', left: 48, bottom: 48, pointerEvents: 'none',
+        animation: phase === 'out' ? `cp-pop-out ${POP_OUT_MS}ms ease-in both` : `cp-pop-in 400ms cubic-bezier(.2,.8,.2,1) both`,
+      }
+    },
+      e('div', {
+        key: data.key,
+        style: { width: CARD_W, height: CARD_H, perspective: 1400 },
+      },
+        e('div', {
+          className: 'cp-card',
+          style: {
+            position: 'relative', width: '100%', height: '100%', transformStyle: 'preserve-3d',
+            transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
+            transition: `transform ${FLIP_MS}ms cubic-bezier(.3,.15,.15,1)`,
+            boxShadow: '0 24px 48px -18px rgba(0,0,0,.7)',
+          }
+        },
+          e(CardFace, { card: data.card, isBack: true }),
+          e(CardFace, { card: data.card, isBack: false })
+        )
+      ),
+      e('div', {
+        style: {
+          marginTop: 12, textAlign: 'center',
+          fontFamily: T.display, fontWeight: 900, fontSize: 22, color: T.ink,
+          textShadow: '0 2px 12px rgba(0,0,0,.8)',
+          opacity: flipped ? 1 : 0, transition: 'opacity 300ms ease-out 200ms',
+        }
+      }, `@${data.user_name} pulled ${data.card.name}${data.duplicate ? ' (dupe)' : ''}`)
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(e(CardPullOverlay));
+})();
+</script>
+</body>
+</html>

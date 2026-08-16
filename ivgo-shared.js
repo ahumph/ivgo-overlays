@@ -144,7 +144,7 @@ const _bus = (function () {
       _channel = _socket.channel('overlay:events', {});
       // Allowlist — a server-pushed event not named here never reaches
       // bus.on() listeners, so new event types must be added in both places.
-      ['channel.follow', 'channel.subscribe', 'channel.subscription.gift', 'channel.cheer', 'channel.raid', 'channel.shoutout.create', 'overlay.fire'].forEach(type => {
+      ['channel.follow', 'channel.subscribe', 'channel.subscription.gift', 'channel.cheer', 'channel.raid', 'channel.shoutout.create', 'overlay.fire', 'card.pull'].forEach(type => {
         _channel.on(type, payload => dispatch(type, payload));
       });
       _channel.join()
