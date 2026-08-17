@@ -22,6 +22,7 @@ Extras layered on every scene:
 
 - **Now Playing** — a slide-out strip showing what's playing on Tidal / YouTube. Hidden by default; viewers reveal it with `!np` or `!playing` in chat.
 - **Fire Overlay** — triggered by the `!fine` chat command (costs 100 Ostis); plays a fire effect over whatever scene you're on.
+- **Card Pull** — triggered by the `!pull` chat command (Trading Cards feature); pops bottom-left as a WeeMan card back, flips to reveal the pulled card, holds ~6s.
 - **Clip Player** — paste a link to one of this channel's clips in chat and it plays in a panel (centered, or small in the top-left); mods can `!so <user>` to play another streamer's featured clip. Clips from other channels are ignored.
 - **WeeMan Avatars** — viewers type `!weeman` to send their own WeeMan walking along the bottom of the stream for 15 minutes, in their chat colour, with their chat messages in speech bubbles above it.
 - **Commands card** — `!info` slides up a card listing the chat commands that work on this scene. On 07 Arranging the same command shows the ON THE DESK piece card instead.

@@ -400,6 +400,26 @@ local function build_fire(scene, base, socket_url)
     end
 end
 
+-- Trading-card pull reveal (chat !pull reward): a single "IVGO: Card Pull"
+-- browser source layered on every main scene, same pattern as build_fire
+-- immediately above. Listens for the `card.pull` event on overlay:events
+-- (ivgo-ex Trading Cards feature); payload lands after a successful !pull.
+-- Pops bottom-left as a WeeMan card back, flips to reveal, holds ~6s.
+--
+-- toasts=0/egg_off=1/raid_bg_off=1 for the same reason build_fire needs
+-- them: this scene loads ivgo-shared.js too, which auto-mounts toasts, the
+-- video egg and the raid backdrop on every page that connects to the bus.
+-- Without these, stacking it on a scene that already has its own chrome
+-- mounting those elements doubles them.
+local function build_card_pull(scene, base, socket_url)
+    local url = base .. "/14-card-pull.html?toasts=0&egg_off=1&raid_bg_off=1"
+    local src = make_browser("IVGO: Card Pull", append_socket_url(url, socket_url))
+    if src then
+        place(scene, src, 0, 0, 1920, 1080)
+        obs.obs_source_release(src)
+    end
+end
+
 -- Clip player (chat clip links + mod shoutouts): a single "IVGO: Clip Player"
 -- browser source layered just under the fire overlay on every main scene.
 -- Reads chat over its own anonymous IRC socket and plays a centered panel.
@@ -588,6 +608,7 @@ local function build_starting_soon(base, countdown_mins, socket_url, np_base)
     build_weeman(scene, base, socket_url)
     build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
+    build_card_pull(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
 
@@ -639,6 +660,7 @@ local function build_game(base, socket_url, np_base)
     build_weeman(scene, base, socket_url)
     build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
+    build_card_pull(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
 
@@ -668,6 +690,7 @@ local function build_camera(base, host, host_role, socket_url, np_base)
     build_weeman(scene, base, socket_url)
     build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
+    build_card_pull(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
 
@@ -684,6 +707,7 @@ local function build_brb(base, socket_url, np_base)
     build_weeman(scene, base, socket_url)
     build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
+    build_card_pull(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
 
@@ -725,6 +749,7 @@ local function build_two_cam(base, host, host_role, guest, g_role, topic, socket
     build_weeman(scene, base, socket_url)
     build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
+    build_card_pull(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
 
@@ -750,6 +775,7 @@ local function build_ending(base, socket_url, np_base)
     build_weeman(scene, base, socket_url)
     build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
+    build_card_pull(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
 
@@ -873,6 +899,7 @@ local function build_arranging(base, piece, collection, sprints_total, focus_min
     build_weeman(scene, base, socket_url)
     build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
+    build_card_pull(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
 
