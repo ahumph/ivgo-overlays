@@ -126,7 +126,6 @@ const _bus = (function () {
     if (typeof Phoenix === 'undefined') return;
 
     const params = new URLSearchParams(location.search);
-    if (params.get('toasts') === '0') return;
     // Fallback chain: explicit ?socket_url= wins; otherwise build from
     // location if the page has a real host (served from a dev server or
     // OBS via http URL); otherwise default to the production Fly URL so
@@ -749,11 +748,18 @@ if (typeof document !== 'undefined') {
          String(p.from_broadcaster_user_login).toLowerCase() === _ourChannel);
     const _onIncomingRaid = fn => p => { if (!_isOutgoingRaid(p)) fn(p); };
 
-    _bus.on('channel.follow', p => _toast.toast({ type: 'follow', ...p }));
-    _bus.on('channel.subscribe', p => _toast.toast({ type: 'sub', ...p }));
-    _bus.on('channel.subscription.gift', p => _toast.toast({ type: 'gift', ...p }));
-    _bus.on('channel.cheer', p => _toast.toast({ type: 'cheer', ...p }));
-    _bus.on('channel.raid', _onIncomingRaid(p => _toast.toast({ type: 'raid', ...p })));
+    // toasts=0 suppresses toast popups on secondary/chrome-only overlay
+    // sources (e.g. Card Pull, Fire) that already get toasts from the
+    // primary scene chrome — it must NOT gate the bus connection itself.
+    const _toastsEnabled = new URLSearchParams(location.search).get('toasts') !== '0';
+
+    if (_toastsEnabled) {
+      _bus.on('channel.follow', p => _toast.toast({ type: 'follow', ...p }));
+      _bus.on('channel.subscribe', p => _toast.toast({ type: 'sub', ...p }));
+      _bus.on('channel.subscription.gift', p => _toast.toast({ type: 'gift', ...p }));
+      _bus.on('channel.cheer', p => _toast.toast({ type: 'cheer', ...p }));
+      _bus.on('channel.raid', _onIncomingRaid(p => _toast.toast({ type: 'raid', ...p })));
+    }
 
     _bus.on('channel.follow',            () => _videoEgg.alrighty());
     _bus.on('channel.subscribe',         () => _videoEgg.alrighty());
