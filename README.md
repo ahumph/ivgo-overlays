@@ -389,6 +389,8 @@ Two triggers:
 
 Clips play at full volume — ride your own levels. The installer configures the source's audio for you: **Control audio via OBS** (`reroute_audio`) so it lands in the mixer as its own channel, and **Monitor and Output** so you hear it too. Without the first, browser audio bypasses the mixer and only reaches the stream if you happen to capture desktop audio.
 
+That reroute buffers the audio slightly behind the picture, so the panel deliberately sits on the clip's last frame for a moment before fading — otherwise tearing the `<video>` down on `ended` throws away whatever audio OBS hasn't played yet, and the clip's last couple of seconds come out silent. Tune the hold with `clip_tail` (see below).
+
 Unlike the other overlay sources, the Clip Player is also set to **not** shut down when hidden and **not** refresh on scene activation. It's stateful — an IRC connection plus every cooldown and already-played record — so a restart would kill a playing clip and reset the spam limits on every scene change.
 
 Raid alerts win: a raid pulls the panel off screen immediately, cuts its audio, drops the interrupted clip, and blocks new ones for 10s (the length of `WeeManRaid.mp4`).
@@ -441,6 +443,7 @@ Per-source URL overrides, if one scene wants different treatment from the rest:
 | `clip_w` / `clip_h` | Explicit video box size, overriding the preset. |
 | `clip_top` / `clip_left` | Anchor offset in px. Setting either one anchors the panel instead of centering it — so a large panel can sit in a corner too. |
 | `clip_off=1` | Disable on this source. |
+| `clip_tail=<ms>` | How long the panel holds the last frame after a clip ends, so OBS can drain its rerouted audio buffer (default `1200`). Raise it if the last words still get clipped, lower it if the panel lingers. `0` retires the panel the instant playback ends. |
 
 #### How clips resolve to video
 

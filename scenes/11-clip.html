@@ -103,6 +103,20 @@
   const MAX_QUEUE          = 3;
   const FADE_OUT_MS        = 400;
 
+  // Audio tail hold. OBS's "Control audio via OBS" (reroute_audio) pulls the
+  // browser source's audio through a buffer that runs behind the picture. If we
+  // pause and unmount the <video> the instant 'ended' fires, whatever is still
+  // in that buffer is thrown away — the clip looks complete but the last couple
+  // of seconds are silent. So on a *natural* end we sit on the last frame with
+  // the element still alive and unpaused, and only then start the fade.
+  //
+  // This does NOT apply to an abort (raid, !clipstop, raid-out preempt): those
+  // are supposed to cut the audio dead, which is the whole point of them.
+  //
+  // Tune with ?clip_tail=<ms> if your OBS runs a bigger offset; 0 restores the
+  // old cut-on-ended behaviour.
+  const AUDIO_TAIL_MS = Math.max(0, parseInt(P.get('clip_tail') || '1200', 10) || 0);
+
   // ── Clip link matching ──────────────────────────────────────────────────
   // Covers every shape Twitch hands out:
   //   clips.twitch.tv/<Slug>
@@ -494,6 +508,7 @@
     const [left,  setLeft]  = React.useState(0);   // seconds remaining
     const [pct,   setPct]   = React.useState(0);
     const videoRef = React.useRef(null);
+    const tailRef  = React.useRef(null);   // pending audio-tail hold, see AUDIO_TAIL_MS
 
     React.useEffect(() => {
       director.setView({
@@ -537,7 +552,14 @@
       }
       const budget = Math.max(20000, ((item.clip.durationSeconds || 60) + 15) * 1000);
       const watchdog = setTimeout(() => director.finished(), budget);
-      return () => clearTimeout(watchdog);
+      return () => {
+        clearTimeout(watchdog);
+        // Drop any tail hold along with this item. An abort (raid, !clipstop,
+        // raid-out preempt) can start the *next* clip inside the hold window,
+        // and a stale timer firing then would retire a clip that just started.
+        clearTimeout(tailRef.current);
+        tailRef.current = null;
+      };
     }, [item, phase]);
 
     if (!item) return null;
@@ -612,7 +634,18 @@
           key: clip.slug,
           src: clip.src,
           autoPlay: true, playsInline: true, preload: 'auto',
-          onEnded: () => director.finished(),
+          // Natural end: leave the element mounted and unpaused for the tail
+          // hold so OBS can drain its audio buffer, THEN retire the panel.
+          // Playback is already over, so nothing further is heard from the
+          // element itself — we're only keeping the audio stream open.
+          onEnded: () => {
+            if (!AUDIO_TAIL_MS) { director.finished(); return; }
+            clearTimeout(tailRef.current);
+            tailRef.current = setTimeout(() => {
+              tailRef.current = null;
+              director.finished();
+            }, AUDIO_TAIL_MS);
+          },
           onError: () => { console.warn('[IVGO clip] video error for ' + clip.slug); director.finished(); },
           onTimeUpdate: (ev) => {
             const v = ev.currentTarget;
