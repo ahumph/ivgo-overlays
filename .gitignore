@@ -4,3 +4,6 @@ tools/now-playing.json.tmp
 
 # Test-script output dumps
 tools/smtc-test.out.txt
+
+# Local git worktrees for parallel feature work — never commit
+.worktrees/
