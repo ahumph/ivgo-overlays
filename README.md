@@ -36,7 +36,7 @@ Extras layered on every scene:
 You need:
 
 - **OBS Studio 28+** (any platform — macOS, Windows, Linux).
-- This repo cloned to a stable folder. *Don't* leave it in Downloads — OBS will load files from this path every stream.
+- This repo cloned to a stable folder. The browser sources themselves load from `https://overlays.ivgorchestra.com/<scene>` — the clone is only needed to run the Lua/Python setup scripts and to read these docs.
 - A webcam (and a second webcam if you want to do interview streams).
 - Optional: **Pianoteq** running, if you want the live keyboard panel on the Arranging scene.
 - Optional: **Windows PowerShell 5.1** (built into Windows), if you want the Now Playing strip to read from Tidal/YouTube via SMTC.
@@ -237,7 +237,7 @@ If you'd rather build the scenes by hand, here's the source layout per scene. Po
 
 ### URL pattern
 
-For local files: `file:///C:/path/to/ivgo-overlays/scenes/02-game.html`
+Every browser source loads from the hosted overlay pack: `https://overlays.ivgorchestra.com/<clean-scene-name>`, e.g. `https://overlays.ivgorchestra.com/game`.
 For the now-playing source: `http://localhost:7779/scenes/09-now-playing.html?debug=0`
 
 ### Per-scene source list (bottom layer first)
@@ -247,20 +247,20 @@ For the now-playing source: `http://localhost:7779/scenes/09-now-playing.html?de
 |---|---|---|---|
 | Game Capture | Game/Screen Capture | 0, 0 | 1920×1080 |
 | Host Camera | Video Capture | 1570, 64 | 340×191 |
-| Game Overlay | Browser (`02-game.html`) | 0, 0 | 1920×1080 |
-| Cam Outline | Browser (`02-cam-outline.html?toasts=0`) | 0, 0 | 1920×1080 |
-| Chat | Browser (`02-chat.html?toasts=0`) | 0, 0 | 1920×1080 |
+| Game Overlay | Browser (`/game`) | 0, 0 | 1920×1080 |
+| Cam Outline | Browser (`/game-cam-outline?toasts=0`) | 0, 0 | 1920×1080 |
+| Chat | Browser (`/game-chat?toasts=0`) | 0, 0 | 1920×1080 |
 | Now Playing | Browser (`http://localhost:7779/scenes/09-now-playing.html?debug=0`) | 0, 110 | 1920×1080 |
-| Commands Card | Browser (`13-help.html?toasts=0&egg_off=1&raid_bg_off=1&help_items=...`) | 0, 0 | 1920×1080 |
-| WeeMan Avatars | Browser (`12-weeman.html?toasts=0&egg_off=1&raid_bg_off=1&channel=...`) | 0, 0 | 1920×1080 |
-| Clip Player | Browser (`11-clip.html?toasts=0&egg_off=1&raid_bg_off=1&channel=...&clip_size=...`) | 0, 0 | 1920×1080 |
-| Fire Overlay | Browser (`10-fire.html?toasts=0&egg_off=1&raid_bg_off=1`) | 0, 0 | 1920×1080 |
+| Commands Card | Browser (`/help?toasts=0&egg_off=1&raid_bg_off=1&help_items=...`) | 0, 0 | 1920×1080 |
+| WeeMan Avatars | Browser (`/weeman?toasts=0&egg_off=1&raid_bg_off=1&channel=...`) | 0, 0 | 1920×1080 |
+| Clip Player | Browser (`/clip?toasts=0&egg_off=1&raid_bg_off=1&channel=...&clip_size=...`) | 0, 0 | 1920×1080 |
+| Fire Overlay | Browser (`/fire?toasts=0&egg_off=1&raid_bg_off=1`) | 0, 0 | 1920×1080 |
 
 **03 Camera**
 | Source | Type | Position | Size |
 |---|---|---|---|
 | Host Camera | Video Capture | 320, 180 | 1280×720 |
-| Camera Overlay | Browser (`03-camera.html?host=...&hostRole=...`) | 0, 0 | 1920×1080 |
+| Camera Overlay | Browser (`/camera?host=...&hostRole=...`) | 0, 0 | 1920×1080 |
 | Now Playing | Browser | 0, 0 | 1920×1080 |
 | Commands Card | Browser | 0, 0 | 1920×1080 |
 | WeeMan Avatars | Browser | 0, 0 | 1920×1080 |
@@ -272,7 +272,7 @@ For the now-playing source: `http://localhost:7779/scenes/09-now-playing.html?de
 |---|---|---|---|
 | Host Camera | Video Capture | 88, 72 | 904×858 |
 | Guest Camera | Video Capture | 1010, 72 | 904×858 |
-| Two-Cam Overlay | Browser (`05-two-cam.html?host=...&guest=...&topic=...`) | 0, 0 | 1920×1080 |
+| Two-Cam Overlay | Browser (`/two-camera?host=...&guest=...&topic=...`) | 0, 0 | 1920×1080 |
 | Now Playing | Browser | 0, 0 | 1920×1080 |
 | Commands Card | Browser | 0, 0 | 1920×1080 |
 | WeeMan Avatars | Browser | 0, 0 | 1920×1080 |
@@ -285,10 +285,10 @@ For the now-playing source: `http://localhost:7779/scenes/09-now-playing.html?de
 | Arranging Screen | Monitor / Display Capture | 0, 0 | 1920×1080 |
 | Host Camera | Video Capture | 10, 64 | 282×158 |
 | Pianoteq (inside Keyboard group) | Window Capture | 266, 842 | 1260×192 |
-| Arranging Keyboard Frame (inside Keyboard group) | Browser (`08-keyboard-frame.html?toasts=0`) | 0, 0 | 1920×1080 |
-| Arranging Overlay | Browser (`07-arranging.html?piece=...&collection=...&...`) | 0, 0 | 1920×1080 |
-| Arranging Cam Outline | Browser (`07-cam-outline.html?toasts=0`) | 0, 0 | 1920×1080 |
-| Arranging Chat | Browser (`07-chat.html?toasts=0`) | 0, 0 | 1920×1080 |
+| Arranging Keyboard Frame (inside Keyboard group) | Browser (`/keyboard-frame?toasts=0`) | 0, 0 | 1920×1080 |
+| Arranging Overlay | Browser (`/arranging?piece=...&collection=...&...`) | 0, 0 | 1920×1080 |
+| Arranging Cam Outline | Browser (`/arranging-cam-outline?toasts=0`) | 0, 0 | 1920×1080 |
+| Arranging Chat | Browser (`/arranging-chat?toasts=0`) | 0, 0 | 1920×1080 |
 | Now Playing | Browser | 0, 0 | 1920×1080 |
 | Commands Card | Browser | 0, 0 | 1920×1080 |
 | WeeMan Avatars | Browser | 0, 0 | 1920×1080 |
@@ -299,7 +299,7 @@ For the now-playing source: `http://localhost:7779/scenes/09-now-playing.html?de
 | Source | Type | Position | Size |
 |---|---|---|---|
 | (Video — Media Source for 01 and 06) | Media Source — `media/buts.mkv` or `media/tetris.webm` | 0, 0 | 1920×1080 |
-| Scene overlay | Browser (`01-starting-soon.html?mins=5&secs=0` / `04-brb.html` / `06-ending.html`) | 0, 0 | 1920×1080 |
+| Scene overlay | Browser (`/starting-soon?mins=5&secs=0` / `/brb` / `/ending`) | 0, 0 | 1920×1080 |
 | Now Playing | Browser | 0, 0 | 1920×1080 |
 | Commands Card | Browser | 0, 0 | 1920×1080 |
 | WeeMan Avatars | Browser | 0, 0 | 1920×1080 |
@@ -447,9 +447,9 @@ Per-source URL overrides, if one scene wants different treatment from the rest:
 
 #### How clips resolve to video
 
-Twitch's official `clips.twitch.tv/embed` iframe requires a `parent=` domain matching a real HTTP origin, and OBS loads these scenes over `file://` — so the embed is out. Helix returns clip metadata but no playable file (the old "swap the thumbnail suffix for `.mp4`" trick doesn't work on clips hosted under `twitch-video-assets`). So the page queries Twitch's GQL endpoint with the public web Client-Id for a signed, direct MP4, which a plain `<video>` element plays.
+Twitch's official `clips.twitch.tv/embed` iframe requires a `parent=` domain matching a real HTTP origin, and `overlays.ivgorchestra.com` isn't on Twitch's allowlist — so the embed is out. Helix returns clip metadata but no playable file (the old "swap the thumbnail suffix for `.mp4`" trick doesn't work on clips hosted under `twitch-video-assets`). So the page queries Twitch's GQL endpoint with the public web Client-Id for a signed, direct MP4, which a plain `<video>` element plays.
 
-That endpoint is undocumented — the same one clip downloaders use. It works today from a `file://` origin (it answers `Access-Control-Allow-Origin: *`), but Twitch owes it no stability. If it ever changes, clips stop resolving and the panel just never appears — nothing else on the overlay is affected, and the reason lands in the browser-source console.
+That endpoint is undocumented — the same one clip downloaders use. It works today regardless of the calling origin (it answers `Access-Control-Allow-Origin: *`), but Twitch owes it no stability. If it ever changes, clips stop resolving and the panel just never appears — nothing else on the overlay is affected, and the reason lands in the browser-source console.
 
 ---
 
@@ -459,7 +459,7 @@ That endpoint is undocumented — the same one clip downloaders use. It works to
 Check **Help → Log Files → View Current Log**. Look for `[IVGO]` lines. If you see "Could not place source", a scene name might already be taken by an old install — delete the old scene first and re-run.
 
 **Now Playing label is greyed out / no track shows even when Tidal is playing.**
-Confirm the watch script is still running (its console window should still be open). Check it's writing `tools/now-playing.json` with track data. Verify the OBS browser source's URL is `http://localhost:7779/scenes/09-now-playing.html?debug=0` (not `file://`).
+Confirm the watch script is still running (its console window should still be open). Check it's writing `tools/now-playing.json` with track data. Verify the OBS browser source's URL is `http://localhost:7779/scenes/09-now-playing.html?debug=0` — this is the one source that still points at a local URL rather than `overlays.ivgorchestra.com`.
 
 **Now Playing label disappears entirely.**
 The watch script likely crashed. Restart it. Right-click `IVGO: Now Playing` → **Refresh cache of current page**.

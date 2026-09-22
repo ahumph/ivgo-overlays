@@ -45,13 +45,9 @@ local function append_socket_url(url, socket_url)
 end
 
 local function scenes_base_url()
-    -- script_path() returns the directory containing this .lua file with a
-    -- trailing slash, e.g. /Users/adam/ivgo-overlays/ or C:\Users\adam\ivgo-overlays\
-    local dir = script_path():gsub("\\", "/")   -- normalise Windows separators
-    -- Mac/Linux: dir = /Users/.../    → "file://" + dir + "scenes" = file:///Users/.../scenes
-    -- Windows:   dir = C:/Users/.../  → "file:///" + dir + "scenes" = file:///C:/Users/.../scenes
-    local prefix = is_windows() and "file:///" or "file://"
-    return prefix .. dir .. "scenes"
+    -- Overlay scenes are hosted publicly so console/Lightstream setups (which
+    -- can't load file:// paths) work the same as local OBS setups.
+    return "https://overlays.ivgorchestra.com"
 end
 
 -- ── git ──────────────────────────────────────────────────────────────────────
@@ -392,7 +388,7 @@ end
 -- these, a raid plays WeeManRaid.mp4 twice with doubled audio — once from the
 -- scene's chrome overlay and once from here.
 local function build_fire(scene, base, socket_url)
-    local url = base .. "/10-fire.html?toasts=0&egg_off=1&raid_bg_off=1"
+    local url = base .. "/fire?toasts=0&egg_off=1&raid_bg_off=1"
     local src = make_browser("IVGO: Fire Overlay", append_socket_url(url, socket_url))
     if src then
         place(scene, src, 0, 0, 1920, 1080)
@@ -412,7 +408,7 @@ end
 -- Without these, stacking it on a scene that already has its own chrome
 -- mounting those elements doubles them.
 local function build_card_pull(scene, base, socket_url)
-    local url = base .. "/14-card-pull.html?toasts=0&egg_off=1&raid_bg_off=1"
+    local url = base .. "/card-pull?toasts=0&egg_off=1&raid_bg_off=1"
     local src = make_browser("IVGO: Card Pull", append_socket_url(url, socket_url))
     if src then
         place(scene, src, 0, 0, 1920, 1080)
@@ -480,7 +476,7 @@ local function build_clip(scene, base, socket_url)
 
     local channel = obs.obs_data_get_string(settings_ref, "twitch_channel")
     local size    = obs.obs_data_get_string(settings_ref, "clip_size")
-    local url = base .. "/11-clip.html?toasts=0&egg_off=1&raid_bg_off=1"
+    local url = base .. "/clip?toasts=0&egg_off=1&raid_bg_off=1"
     if channel and channel ~= "" then
         url = url .. "&channel=" .. string.lower(channel)
     end
@@ -511,7 +507,7 @@ local function build_weeman(scene, base, socket_url)
 
     local channel = obs.obs_data_get_string(settings_ref, "twitch_channel")
     local mins    = obs.obs_data_get_int(settings_ref, "weeman_mins")
-    local url = base .. "/12-weeman.html?toasts=0&egg_off=1&raid_bg_off=1"
+    local url = base .. "/weeman?toasts=0&egg_off=1&raid_bg_off=1"
     if channel and channel ~= "" then
         url = url .. "&channel=" .. string.lower(channel)
     end
@@ -553,7 +549,7 @@ local function build_help(scene, base, socket_url, np_base)
     -- needs a page refresh rather than a scene rebuild.
 
     local channel = obs.obs_data_get_string(settings_ref, "twitch_channel")
-    local url = base .. "/13-help.html?toasts=0&egg_off=1&raid_bg_off=1"
+    local url = base .. "/help?toasts=0&egg_off=1&raid_bg_off=1"
     url = url .. "&help_items=" .. table.concat(items, ",")
     if channel and channel ~= "" then
         url = url .. "&channel=" .. string.lower(channel)
@@ -581,7 +577,7 @@ local function build_now_playing(scene, np_base, y_offset)
 end
 
 local function build_starting_soon(base, countdown_mins, socket_url, np_base)
-    local url = base .. "/01-starting-soon.html?mic=1"
+    local url = base .. "/starting-soon?mic=1"
     if countdown_mins and countdown_mins > 0 then
         url = url .. "&mins=" .. tostring(countdown_mins) .. "&secs=0"
     end
@@ -635,19 +631,19 @@ local function build_game(base, socket_url, np_base)
         obs.obs_source_release(cam)
     end
 
-    local overlay = make_browser("IVGO: Game Overlay",  append_socket_url(base .. "/02-game.html?mic=1", socket_url))
+    local overlay = make_browser("IVGO: Game Overlay",  append_socket_url(base .. "/game?mic=1", socket_url))
     if overlay then
         place(scene, overlay, 0, 0, 1920, 1080)
         obs.obs_source_release(overlay)
     end
 
-    local cam_frame = make_browser("IVGO: Cam Outline", append_socket_url(base .. "/02-cam-outline.html?toasts=0", socket_url))
+    local cam_frame = make_browser("IVGO: Cam Outline", append_socket_url(base .. "/game-cam-outline?toasts=0", socket_url))
     if cam_frame then
         place(scene, cam_frame, 0, 0, 1920, 1080)
         obs.obs_source_release(cam_frame)
     end
 
-    local chat = make_browser("IVGO: Chat",             append_socket_url(base .. "/02-chat.html?toasts=0", socket_url))
+    local chat = make_browser("IVGO: Chat",             append_socket_url(base .. "/game-chat?toasts=0", socket_url))
     if chat then
         place(scene, chat, 0, 0, 1920, 1080)
         obs.obs_source_release(chat)
@@ -679,7 +675,7 @@ local function build_camera(base, host, host_role, socket_url, np_base)
     end
 
     local cam_params = "host=" .. urlencode(host) .. "&hostRole=" .. urlencode(host_role) .. "&mic=1"
-    local overlay = make_browser("IVGO: Camera Overlay", append_socket_url(base .. "/03-camera.html?" .. cam_params, socket_url))
+    local overlay = make_browser("IVGO: Camera Overlay", append_socket_url(base .. "/camera?" .. cam_params, socket_url))
     if overlay then
         place(scene, overlay, 0, 0, 1920, 1080)
         obs.obs_source_release(overlay)
@@ -697,7 +693,7 @@ end
 local function build_brb(base, socket_url, np_base)
     local scene_src = get_scene_source("IVGO · 04 Be Right Back")
     local scene     = obs.obs_scene_from_source(scene_src)
-    local src       = make_browser("IVGO: BRB", append_socket_url(base .. "/04-brb.html?mic=1", socket_url))
+    local src       = make_browser("IVGO: BRB", append_socket_url(base .. "/brb?mic=1", socket_url))
     if src then
         place(scene, src, 0, 0, 1920, 1080)
         obs.obs_source_release(src)
@@ -738,7 +734,7 @@ local function build_two_cam(base, host, host_role, guest, g_role, topic, socket
                    "&guestRole=" .. urlencode(g_role)     ..
                    "&topic="     .. urlencode(topic)     ..
                    "&mic=1"
-    local overlay = make_browser("IVGO: Two-Cam Overlay", append_socket_url(base .. "/05-two-cam.html?" .. params, socket_url))
+    local overlay = make_browser("IVGO: Two-Cam Overlay", append_socket_url(base .. "/two-camera?" .. params, socket_url))
     if overlay then
         place(scene, overlay, 0, 0, 1920, 1080)
         obs.obs_source_release(overlay)
@@ -765,7 +761,7 @@ local function build_ending(base, socket_url, np_base)
         obs.obs_source_release(video)
     end
 
-    local src = make_browser("IVGO: Ending", append_socket_url(base .. "/06-ending.html?mic=1", socket_url))
+    local src = make_browser("IVGO: Ending", append_socket_url(base .. "/ending?mic=1", socket_url))
     if src then
         place(scene, src, 0, 0, 1920, 1080)
         obs.obs_source_release(src)
@@ -850,7 +846,7 @@ local function build_arranging(base, piece, collection, sprints_total, focus_min
         obs.obs_source_release(kb)
     end
 
-    local kb_frame = make_browser("IVGO: Arranging Keyboard Frame", base .. "/08-keyboard-frame.html?toasts=0")
+    local kb_frame = make_browser("IVGO: Arranging Keyboard Frame", base .. "/keyboard-frame?toasts=0")
     if kb_frame then
         place(kb_scene, kb_frame, 0, 0, 1920, 1080)
         obs.obs_source_release(kb_frame)
@@ -875,19 +871,19 @@ local function build_arranging(base, piece, collection, sprints_total, focus_min
                    "&egg_top=64&egg_left=302&egg_h=158" ..
                    "&mic=1"
 
-    local overlay = make_browser("IVGO: Arranging Overlay", append_socket_url(base .. "/07-arranging.html?" .. params, socket_url))
+    local overlay = make_browser("IVGO: Arranging Overlay", append_socket_url(base .. "/arranging?" .. params, socket_url))
     if overlay then
         place(scene, overlay, 0, 0, 1920, 1080)
         obs.obs_source_release(overlay)
     end
 
-    local cam_frame = make_browser("IVGO: Arranging Cam Outline", append_socket_url(base .. "/07-cam-outline.html?toasts=0", socket_url))
+    local cam_frame = make_browser("IVGO: Arranging Cam Outline", append_socket_url(base .. "/arranging-cam-outline?toasts=0", socket_url))
     if cam_frame then
         place(scene, cam_frame, 0, 0, 1920, 1080)
         obs.obs_source_release(cam_frame)
     end
 
-    local chat = make_browser("IVGO: Arranging Chat", append_socket_url(base .. "/07-chat.html?toasts=0", socket_url))
+    local chat = make_browser("IVGO: Arranging Chat", append_socket_url(base .. "/arranging-chat?toasts=0", socket_url))
     if chat then
         place(scene, chat, 0, 0, 1920, 1080)
         obs.obs_source_release(chat)
