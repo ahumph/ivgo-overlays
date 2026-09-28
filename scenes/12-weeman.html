@@ -36,22 +36,28 @@
   const { T, bus, WeeMan } = window.IVGO;
   const e = React.createElement;
 
-  // Chat-summoned WeeMan avatars that walk along the bottom of the stream.
+  // WeeMan avatars that walk along the bottom of the stream, one per
+  // chatter, automatically:
   //
-  //   !weeman        summons yours for 15 minutes, or refreshes the timer if
-  //                  it is already out. One per viewer, ever.
-  //   !weemanclear   mods and broadcaster, sends everyone home.
-  //   !hiss          mods only. Infects every WeeMan currently on screen for
-  //                  5 minutes: red pulse, garbled speech bubbles.
-  //   !hiss <user>   mods only. Infects just that one (must already be out).
+  //   Anyone who chats   gets their own WeeMan for 15 minutes, or has the
+  //                      timer topped back up if theirs is already out -
+  //                      no command needed. It stays out for as long as
+  //                      they keep chatting.
+  //   !weeman            same summon/refresh, for someone who wants to
+  //                      appear without saying anything else.
+  //   !weemanclear       mods and broadcaster, sends everyone home.
+  //   !hiss              mods only. Infects every WeeMan currently on screen
+  //                      for 5 minutes: red pulse, garbled speech bubbles.
+  //   !hiss <user>       mods only. Infects just that one (must already be
+  //                      out).
   //
   // Infection is local/visual only for now — no Ostis, no backend. A !purge
   // to cure early is planned once this routes through ivgo-ex, the same way
   // the paid summon below does; until then it only clears on its own timer.
   //
-  // While your avatar is out, anything you say in chat appears in a speech
-  // bubble above it. That is the reason to buy one: it puts you in the scene
-  // rather than just on the chat panel.
+  // While your avatar is out, whatever you say in chat appears in a speech
+  // bubble above it - that is what puts you in the scene rather than just on
+  // the chat panel.
   //
   // Avatars are tinted with the viewer's Twitch chat colour, falling back to
   // the same name hash the chat panel uses, so a given person is the same
@@ -356,7 +362,13 @@
       return;
     }
 
-    // Anything else from someone who is out becomes a speech bubble.
+    // Auto-summon: anyone who chats gets their own WeeMan on screen, no
+    // command needed - summon() already tops the timer back up rather than
+    // spawning a duplicate if theirs is already out, so this also means a
+    // WeeMan stays out for as long as its viewer keeps chatting. !weeman
+    // above still works too, for someone who wants to appear without saying
+    // anything else.
+    summon(key, name, tags['color']);
     say(key, text);
   }
 
