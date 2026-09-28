@@ -65,9 +65,11 @@
 
   root.innerHTML = [
     '<div style="position:absolute;inset:0;background:radial-gradient(ellipse at center, rgba(0,0,0,0) 42%, rgba(0,0,0,.55) 100%)"></div>',
-    '<div style="position:absolute;top:24px;left:24px;display:flex;align-items:center;gap:8px;',
+    // top:64px = the 54px header chrome (HeaderBar in ivgo-shared.js) + 10px
+    // clear of it, so this never overlaps the header on scenes that have one.
+    '<div style="position:absolute;top:64px;left:24px;display:flex;align-items:center;gap:8px;',
       'padding:8px 14px;background:rgba(6,8,10,.88);border:1px solid rgba(255,90,60,.5);',
-      'font-family:' + T.mono + ';font-size:12px;letter-spacing:.14em;color:#ffd6d2;text-transform:uppercase">',
+      'font-family:' + T.mono + ';font-size:12px;letter-spacing:.14em;color:#fff;text-transform:uppercase">',
       '<span style="width:7px;height:7px;border-radius:50%;background:' + T.live + ';animation:resonance-dot 1.1s ease-in-out infinite"></span>',
       'Resonance active',
     '</div>',
