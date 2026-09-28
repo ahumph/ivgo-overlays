@@ -526,6 +526,70 @@ local function build_weeman(scene, base, socket_url)
     end
 end
 
+-- Redaction overlay (chat !redact / !declassify): black-bars a random one of
+-- 4 screen sectors, server-picked, so every connected source (and a reload of
+-- one) agrees on what's covered. No settings of its own - the page just
+-- listens on the shared overlay:events bus, same as WeeMan.
+local function build_redact(scene, base, socket_url)
+    if not settings_ref then return end
+    if not obs.obs_data_get_bool(settings_ref, "redact_overlay") then return end
+
+    local url = base .. "/redact"
+    local src = make_browser("IVGO: Redact", append_socket_url(url, socket_url))
+    if src then
+        configure_stateful_source(src)
+        place(scene, src, 0, 0, 1920, 1080)
+        obs.obs_source_release(src)
+    end
+end
+
+-- Resonance Mode (chat !resonance): the only source here that also opens its
+-- own obs-websocket connection (separate from the socket_url Phoenix
+-- connection above) to duck/boost real OBS input volumes and, optionally,
+-- toggle a pre-made visual filter - see priv/static/overlays/scenes/
+-- 16-resonance.html in ivgo-ex for what it does with these. Music/duck source
+-- names are per-setup, so they come from the fields below rather than being
+-- guessed.
+local function build_resonance(scene, base, socket_url)
+    if not settings_ref then return end
+    if not obs.obs_data_get_bool(settings_ref, "resonance_overlay") then return end
+
+    local music_source  = obs.obs_data_get_string(settings_ref, "resonance_music_source")
+    local duck_sources  = obs.obs_data_get_string(settings_ref, "resonance_duck_sources")
+    local boost_db      = obs.obs_data_get_double(settings_ref, "resonance_boost_db")
+    local duck_db        = obs.obs_data_get_double(settings_ref, "resonance_duck_db")
+    local filter_source = obs.obs_data_get_string(settings_ref, "resonance_filter_source")
+    local filter_name   = obs.obs_data_get_string(settings_ref, "resonance_filter_name")
+
+    local url = base .. "/resonance"
+    local sep = "?"
+    if music_source and music_source ~= "" then
+        url = url .. sep .. "music_source=" .. urlencode(music_source); sep = "&"
+    end
+    if duck_sources and duck_sources ~= "" then
+        url = url .. sep .. "duck_sources=" .. urlencode(duck_sources); sep = "&"
+    end
+    if boost_db and boost_db ~= 0 then
+        url = url .. sep .. "boost_db=" .. tostring(boost_db); sep = "&"
+    end
+    if duck_db and duck_db ~= 0 then
+        url = url .. sep .. "duck_db=" .. tostring(duck_db); sep = "&"
+    end
+    if filter_source and filter_source ~= "" then
+        url = url .. sep .. "filter_source=" .. urlencode(filter_source); sep = "&"
+    end
+    if filter_name and filter_name ~= "" then
+        url = url .. sep .. "filter_name=" .. urlencode(filter_name); sep = "&"
+    end
+
+    local src = make_browser("IVGO: Resonance", append_socket_url(url, socket_url))
+    if src then
+        configure_stateful_source(src)
+        place(scene, src, 0, 0, 1920, 1080)
+        obs.obs_source_release(src)
+    end
+end
+
 -- !info for every scene except 07 Arranging, which has its own: there the
 -- command slides the ON THE DESK piece card up, driven by ivgo-ex. This is the
 -- same gesture and label handle, listing the chat commands that work on this
@@ -605,6 +669,8 @@ local function build_starting_soon(base, countdown_mins, socket_url, np_base)
     build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
     build_card_pull(scene, base, socket_url)
+    build_redact(scene, base, socket_url)
+    build_resonance(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
 
@@ -657,6 +723,8 @@ local function build_game(base, socket_url, np_base)
     build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
     build_card_pull(scene, base, socket_url)
+    build_redact(scene, base, socket_url)
+    build_resonance(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
 
@@ -687,6 +755,8 @@ local function build_camera(base, host, host_role, socket_url, np_base)
     build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
     build_card_pull(scene, base, socket_url)
+    build_redact(scene, base, socket_url)
+    build_resonance(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
 
@@ -704,6 +774,8 @@ local function build_brb(base, socket_url, np_base)
     build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
     build_card_pull(scene, base, socket_url)
+    build_redact(scene, base, socket_url)
+    build_resonance(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
 
@@ -746,6 +818,8 @@ local function build_two_cam(base, host, host_role, guest, g_role, topic, socket
     build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
     build_card_pull(scene, base, socket_url)
+    build_redact(scene, base, socket_url)
+    build_resonance(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
 
@@ -772,6 +846,8 @@ local function build_ending(base, socket_url, np_base)
     build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
     build_card_pull(scene, base, socket_url)
+    build_redact(scene, base, socket_url)
+    build_resonance(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
 
@@ -896,6 +972,8 @@ local function build_arranging(base, piece, collection, sprints_total, focus_min
     build_clip(scene, base, socket_url)
     build_fire(scene, base, socket_url)
     build_card_pull(scene, base, socket_url)
+    build_redact(scene, base, socket_url)
+    build_resonance(scene, base, socket_url)
     obs.obs_source_release(scene_src)
 end
 
@@ -1143,6 +1221,10 @@ function script_defaults(settings)
     obs.obs_data_set_default_bool  (settings, "weeman_avatars", true)
     obs.obs_data_set_default_bool  (settings, "weeman_bubbles", true)
     obs.obs_data_set_default_int   (settings, "weeman_mins", 15)
+    obs.obs_data_set_default_bool  (settings, "redact_overlay", true)
+    obs.obs_data_set_default_bool  (settings, "resonance_overlay", true)
+    obs.obs_data_set_default_double(settings, "resonance_boost_db", 6)
+    obs.obs_data_set_default_double(settings, "resonance_duck_db", -18)
     obs.obs_data_set_default_bool  (settings, "help_card", true)
 
     obs.obs_data_set_default_string(settings, "arr_piece",         "AERITH'S SUITE")
@@ -1217,6 +1299,29 @@ function script_properties()
         obs.OBS_TEXT_INFO)
     obs.obs_properties_add_int(props, "weeman_mins", "WeeMan: minutes on screen", 1, 120, 1)
     obs.obs_properties_add_bool(props, "weeman_bubbles", "WeeMan: show chat speech bubbles")
+
+    obs.obs_properties_add_bool(props, "redact_overlay", "Redaction overlay (chat !redact / !declassify)")
+    obs.obs_properties_add_text(props, "_redact_hint",
+        "!redact (100 Ostis) covers a random one of 4 screen sectors with a black CLASSIFIED bar. !declassify (150 Ostis) clears all of them at once. 15s cooldown between redactions; caps at 4 covered at a time.",
+        obs.OBS_TEXT_INFO)
+
+    obs.obs_properties_add_bool(props, "resonance_overlay", "Resonance Mode (chat !resonance)")
+    obs.obs_properties_add_text(props, "_resonance_hint",
+        "!resonance (300 Ostis, 5min cooldown) runs a 45s window: ducks/boosts real OBS input volumes (read and restored exactly, your mix is never clobbered) and shows a red HUD. Needs the source names below to actually touch OBS audio - blank means the HUD still shows but nothing gets ducked.",
+        obs.OBS_TEXT_INFO)
+    obs.obs_properties_add_text(props, "resonance_music_source", "Resonance: music source name", obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_text(props, "resonance_duck_sources", "Resonance: duck source names (comma-separated)", obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_text(props, "_resonance_sources_hint",
+        "Exact OBS input names, e.g. music source \"Music\", duck sources \"Mic/Aux, Game\". Case-sensitive.",
+        obs.OBS_TEXT_INFO)
+    obs.obs_properties_add_float(props, "resonance_boost_db", "Resonance: music boost (dB)", -60, 30, 1)
+    obs.obs_properties_add_float(props, "resonance_duck_db", "Resonance: duck amount (dB)", -60, 30, 1)
+    obs.obs_properties_add_text(props, "resonance_filter_source", "Resonance: visual filter source (optional)", obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_text(props, "resonance_filter_name", "Resonance: visual filter name (optional)", obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_text(props, "_resonance_filter_hint",
+        "Optional: the name of a filter you've already added to the filter source (e.g. a Color Correction filter on your Game source, left disabled by default) - Resonance Mode enables it for the 45s window and disables it again after. Leave both blank to skip.",
+        obs.OBS_TEXT_INFO)
+
     obs.obs_properties_add_bool(props, "help_card", "Commands card (chat !info)")
     obs.obs_properties_add_text(props, "_help_card_hint",
         "Viewers type !info to slide up a card listing the chat commands that work, the same way !info works on the Arranging scene. Added to every scene except Arranging, which has its own !info. Only lists commands whose feature is switched on above.",
