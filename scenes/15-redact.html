@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>IVGO · 15 Redact</title>
+<meta name="viewport" content="width=1920"/>
+<style>
+  html,body{margin:0;padding:0;background:transparent;width:1920px;height:1080px;overflow:hidden}
+
+  @keyframes redact-in {
+    0%   { opacity:0; transform:scale(.94); }
+    100% { opacity:1; transform:scale(1); }
+  }
+  @keyframes redact-out {
+    from { opacity:1; transform:scale(1); }
+    to   { opacity:0; transform:scale(.92); }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="../phoenix.min.js"></script>
+<script src="../ivgo-shared.js"></script>
+
+<script>
+(function () {
+  const { T, bus } = window.IVGO;
+
+  // !redact blacks out ONE random sector from the 4 below (never chosen by
+  // chat, so it reads as a surprise), and !declassify clears every covered
+  // sector at once. Server-owned state (Ivgo.Twitch.Commands.Control) picks
+  // the zone and tracks coverage, so this page is a dumb renderer: it never
+  // decides which zone is covered, only shows/hides what it is told.
+  //
+  // Layered as its own transparent browser source ABOVE the game capture in
+  // OBS - this scene draws nothing but the four possible black bars, so it
+  // is safe to stack over any other scene.
+  //
+  // URL params:
+  //   redact_off=1   disable on this source
+
+  const P = new URLSearchParams(location.search);
+  if (P.get('redact_off') === '1') return;
+
+  // Four non-overlapping quadrant-ish sectors, inset from the edges and from
+  // each other so a redaction never touches the ticker or corner chrome.
+  const ZONES = [
+    { top: '10%', left: '6%',  width: '32%', height: '26%' },
+    { top: '10%', left: '62%', width: '32%', height: '26%' },
+    { top: '58%', left: '6%',  width: '32%', height: '26%' },
+    { top: '58%', left: '62%', width: '32%', height: '26%' }
+  ];
+
+  const root = document.getElementById('root');
+  root.style.cssText = 'position:absolute;inset:0';
+
+  const nodes = {}; // zone index -> DOM node, only while shown/animating out
+
+  function zoneStyle(z) {
+    return [
+      'position:absolute',
+      'top:' + z.top, 'left:' + z.left, 'width:' + z.width, 'height:' + z.height,
+      'background:#050505',
+      'border:1px solid rgba(255,90,60,.55)',
+      'box-shadow:0 0 0 1px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.5)',
+      'display:flex', 'align-items:center', 'justify-content:center',
+      'animation:redact-in 160ms ease both'
+    ].join(';');
+  }
+
+  function stampStyle() {
+    return [
+      'font-family:' + T.display,
+      'font-weight:800', 'font-size:26px', 'letter-spacing:.14em',
+      'color:' + T.live,
+      'border:2px solid ' + T.live,
+      'padding:6px 18px',
+      'transform:rotate(-8deg)',
+      'white-space:nowrap', 'text-transform:uppercase'
+    ].join(';');
+  }
+
+  function redact(zone) {
+    if (nodes[zone]) return; // already covered — server won't send a duplicate, but stay idempotent
+    const el = document.createElement('div');
+    el.style.cssText = zoneStyle(ZONES[zone]);
+    el.innerHTML = '<span style="' + stampStyle() + '">Classified</span>';
+    root.appendChild(el);
+    nodes[zone] = el;
+  }
+
+  function declassifyAll() {
+    Object.keys(nodes).forEach(zone => {
+      const el = nodes[zone];
+      el.style.animation = 'redact-out 180ms ease both';
+      setTimeout(() => el.remove(), 190);
+      delete nodes[zone];
+    });
+  }
+
+  bus.on('control.redact', (p) => {
+    if (p && Number.isInteger(p.zone)) redact(p.zone);
+  });
+  bus.on('control.declassify', declassifyAll);
+})();
+</script>
+</body>
+</html>
