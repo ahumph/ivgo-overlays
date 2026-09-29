@@ -796,6 +796,15 @@ local function build_brb(base, socket_url, np_base)
     local src       = make_browser("IVGO: BRB", append_socket_url(base .. "/brb?mic=1", socket_url))
     if src then
         place(scene, src, 0, 0, 1920, 1080)
+        -- The page's own about.mkv <video> carries its audio, baked into the
+        -- browser source rather than a separate OBS media source. Browser
+        -- sources don't route their own audio into OBS's mixer by default,
+        -- so reroute_audio is needed for the stream to hear it at all - no
+        -- monitoring type change here, unlike build_fire/build_card_pull.
+        local d = obs.obs_source_get_settings(src)
+        obs.obs_data_set_bool(d, "reroute_audio", true)
+        obs.obs_source_update(src, d)
+        obs.obs_data_release(d)
         obs.obs_source_release(src)
     end
     build_now_playing(scene, np_base)
