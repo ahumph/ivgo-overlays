@@ -22,10 +22,11 @@
   const e = React.createElement;
 
   function SceneStartingSoon() {
-    // Subscribes to live !nextconcert updates - TICKER.startingSoon reads
-    // the current value itself, this just forces the re-render that makes
-    // a later read actually show up on screen.
-    useOverlayConfig();
+    // TICKER.startingSoon (below) already reads this live on its own via
+    // the Proxy in ivgo-shared.js - the countdown box's own "NEXT CONCERT"
+    // line, a second and separate display of the same text, needs the
+    // actual value from here since it isn't reading TICKER at all.
+    const config = useOverlayConfig();
 
     // Countdown — defaults to 4:32, override with ?mins=10&secs=00 or ?target=ISO8601
     const params = new URLSearchParams(location.search);
@@ -96,7 +97,8 @@
           e('div', { style:{height:36,width:1,background:T.rule2} }),
           e('div', { style:{display:'flex',flexDirection:'column',gap:4} },
             e('div', { style:{fontFamily:T.mono,fontSize:10,letterSpacing:'.24em',color:T.ink3} }, 'NEXT CONCERT'),
-            e('div', { style:{fontFamily:T.display,fontSize:18,fontWeight:700,letterSpacing:'.05em'} }, '18.09.2026 · WATERFRONT STUDIO · BELFAST CULTURE NIGHT')
+            e('div', { style:{fontFamily:T.display,fontSize:18,fontWeight:700,letterSpacing:'.05em'} },
+              config.next_concert || '18.09.2026 · WATERFRONT STUDIO · BELFAST CULTURE NIGHT')
           )
         )
       ),
