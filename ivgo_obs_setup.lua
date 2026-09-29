@@ -186,6 +186,10 @@ local function make_game_capture(name)
     -- Volume is reset to -12 dBFS on every refresh — game audio at 0 dB clips
     -- against voice; -12 dB leaves headroom for chat toasts and the host mic.
     -- (display_capture on macOS ignores capture_audio; harmless to set.)
+    -- MONITOR_AND_OUTPUT so game audio also reaches your own monitoring
+    -- device, same reasoning as configure_audio_source below - this is a
+    -- native capture source, not a browser one, so it needs the monitoring
+    -- type set directly rather than that helper's reroute_audio step.
     local kind = game_type()
     local mul = 10 ^ (-12 / 20)   -- -12 dBFS as linear multiplier (~0.2512)
     local existing = obs.obs_get_source_by_name(name)
@@ -195,14 +199,36 @@ local function make_game_capture(name)
         obs.obs_source_update(existing, d)
         obs.obs_data_release(d)
         obs.obs_source_set_volume(existing, mul)
+        obs.obs_source_set_monitoring_type(existing, obs.OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT)
         return existing
     end
     local d = obs.obs_data_create()
     obs.obs_data_set_bool(d, "capture_audio", true)
     local src = obs.obs_source_create(kind, name, d, nil)
     obs.obs_data_release(d)
-    if src then obs.obs_source_set_volume(src, mul) end
+    if src then
+        obs.obs_source_set_volume(src, mul)
+        obs.obs_source_set_monitoring_type(src, obs.OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT)
+    end
     return src
+end
+
+-- Browser sources don't route their own audio into OBS's mixer by default -
+-- it plays out through the OS's default device instead, so it's silent on
+-- stream and unheard by you unless you happen to be capturing desktop audio
+-- too. `reroute_audio` makes the source its own mixer channel, and
+-- MONITOR_AND_OUTPUT sends that channel to both the stream and your own
+-- monitoring device. Any browser source that plays a sound needs both
+-- settings to actually be heard by anyone - build_clip's already had this
+-- (see configure_clip_source below); build_fire and build_card_pull need it
+-- too, and didn't have it, so their alert sounds have been silent on stream
+-- this whole time.
+local function configure_audio_source(src)
+    local d = obs.obs_source_get_settings(src)
+    obs.obs_data_set_bool(d, "reroute_audio", true)
+    obs.obs_source_update(src, d)
+    obs.obs_data_release(d)
+    obs.obs_source_set_monitoring_type(src, obs.OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT)
 end
 
 local function place(scene, source, x, y, w, h)
@@ -391,6 +417,7 @@ local function build_fire(scene, base, socket_url)
     local url = base .. "/fire?toasts=0&egg_off=1&raid_bg_off=1"
     local src = make_browser("IVGO: Fire Overlay", append_socket_url(url, socket_url))
     if src then
+        configure_audio_source(src)
         place(scene, src, 0, 0, 1920, 1080)
         obs.obs_source_release(src)
     end
@@ -411,6 +438,7 @@ local function build_card_pull(scene, base, socket_url)
     local url = base .. "/card-pull?toasts=0&egg_off=1&raid_bg_off=1"
     local src = make_browser("IVGO: Card Pull", append_socket_url(url, socket_url))
     if src then
+        configure_audio_source(src)
         place(scene, src, 0, 0, 1920, 1080)
         obs.obs_source_release(src)
     end
@@ -462,12 +490,7 @@ end
 
 local function configure_clip_source(src)
     configure_stateful_source(src)
-
-    local d = obs.obs_source_get_settings(src)
-    obs.obs_data_set_bool(d, "reroute_audio", true)
-    obs.obs_source_update(src, d)
-    obs.obs_data_release(d)
-    obs.obs_source_set_monitoring_type(src, obs.OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT)
+    configure_audio_source(src)
 end
 
 local function build_clip(scene, base, socket_url)
@@ -732,6 +755,7 @@ local function build_camera(base, host, host_role, socket_url, np_base)
     -- Layer order bottom → top:
     --   1. Host Camera  x:320, y:180, w:1280, h:720  (centred in frame)
     --   2. 03-camera.html chrome + nameplate (transparent)
+    --   3. 03-chat.html chat panel, right margin beside the cam (transparent)
 
     local scene_src = get_scene_source("IVGO · 03 Camera")
     local scene     = obs.obs_scene_from_source(scene_src)
@@ -747,6 +771,12 @@ local function build_camera(base, host, host_role, socket_url, np_base)
     if overlay then
         place(scene, overlay, 0, 0, 1920, 1080)
         obs.obs_source_release(overlay)
+    end
+
+    local chat = make_browser("IVGO: Camera Chat", append_socket_url(base .. "/camera-chat?toasts=0", socket_url))
+    if chat then
+        place(scene, chat, 0, 0, 1920, 1080)
+        obs.obs_source_release(chat)
     end
 
     build_now_playing(scene, np_base)
