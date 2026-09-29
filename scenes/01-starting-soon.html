@@ -18,10 +18,15 @@
 
 <script>
 (function () {
-  const { Scene, HeaderBar, AudioBars, Ticker, T, TICKER } = window.IVGO;
+  const { Scene, HeaderBar, AudioBars, Ticker, T, TICKER, useOverlayConfig } = window.IVGO;
   const e = React.createElement;
 
   function SceneStartingSoon() {
+    // Subscribes to live !nextconcert updates - TICKER.startingSoon reads
+    // the current value itself, this just forces the re-render that makes
+    // a later read actually show up on screen.
+    useOverlayConfig();
+
     // Countdown — defaults to 4:32, override with ?mins=10&secs=00 or ?target=ISO8601
     const params = new URLSearchParams(location.search);
     const initial = (() => {

@@ -18,10 +18,11 @@
 
 <script>
 (function () {
-  const { Scene, HeaderBar, AudioBars, Ticker, T, TICKER } = window.IVGO;
+  const { Scene, HeaderBar, AudioBars, Ticker, T, TICKER, useOverlayConfig } = window.IVGO;
   const e = React.createElement;
 
   function SceneBRB() {
+    useOverlayConfig(); // subscribes to live !nextconcert updates
     return e(Scene, { label: '04 Be Right Back' },
       e(HeaderBar),
       // Text block — pinned to the top half of the canvas so the video below

@@ -18,17 +18,23 @@
 
 <script>
 (function () {
-  const { Scene, HeaderBar, MediaPlaceholder, CornerTrim, Ticker, T, TICKER } = window.IVGO;
+  const { Scene, HeaderBar, MediaPlaceholder, CornerTrim, Ticker, T, TICKER, useOverlayConfig } = window.IVGO;
   const e = React.createElement;
 
   const params = new URLSearchParams(location.search);
   const placeholders = params.get('placeholders') === '1';
-  // Nameplate driven by URL params so the installer can pass host_name /
-  // host_role through. Defaults preserve previous behaviour.
-  const hostName = (params.get('host')     || 'ADAM HUMPHREYS').toUpperCase();
-  const hostRole = (params.get('hostRole') || 'ARTISTIC DIRECTOR · IVGO').toUpperCase();
 
   function SceneCameraOnly() {
+    // Live nameplate: !hostname / !hostrole in chat (Ivgo.Twitch.Commands.
+    // Overlay) update this without a reload. Falls back to the boot-time
+    // URL params (the installer's old host/hostRole fields), then a
+    // hardcoded default, so this still renders something sensible before
+    // the channel join resolves or if nobody's set either yet.
+    const config = useOverlayConfig();
+    const hostName = (config.host_name || params.get('host') || 'ADAM HUMPHREYS').toUpperCase();
+    const hostRole =
+      (config.host_role || params.get('hostRole') || 'ARTISTIC DIRECTOR · IVGO').toUpperCase();
+
     return e(Scene, { label: '03 Camera Only', transparent: !placeholders },
       e(HeaderBar),
 

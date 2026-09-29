@@ -18,20 +18,26 @@
 
 <script>
 (function () {
-  const { Scene, HeaderBar, MediaPlaceholder, Ticker, T, TICKER } = window.IVGO;
+  const { Scene, HeaderBar, MediaPlaceholder, Ticker, T, TICKER, useOverlayConfig } = window.IVGO;
   const e = React.createElement;
 
   const params = new URLSearchParams(location.search);
   const placeholders = params.get('placeholders') === '1';
 
   // Configurable via URL: ?host=ADAM%20HUMPHREYS&hostRole=ARTISTIC%20DIRECTOR&guest=...&guestRole=...&topic=...
-  const host       = params.get('host')      ?? 'ADAM HUMPHREYS';
-  const hostRole   = params.get('hostRole')  ?? 'ARTISTIC DIRECTOR';
+  // Host/hostRole are overridden live by !hostname / !hostrole in chat
+  // (Ivgo.Twitch.Commands.Overlay) if set - these URL params are only the
+  // fallback before that resolves. Guest/topic have no chat command; URL
+  // params are the only way to set them.
   const guest      = params.get('guest')     ?? 'NIAMH O\u2019CONNOR';
   const guestRole  = params.get('guestRole') ?? 'PRINCIPAL VIOLIN';
   const topic      = params.get('topic')     ?? 'WHY VIDEO GAME MUSIC DESERVES A FULL ORCHESTRA';
 
   function SceneTwoCam() {
+    const config = useOverlayConfig();
+    const host     = config.host_name || params.get('host')     || 'ADAM HUMPHREYS';
+    const hostRole = config.host_role || params.get('hostRole') || 'ARTISTIC DIRECTOR';
+
     const people = [
       { label:'HOST',  name: host,  role: hostRole },
       { label:'GUEST', name: guest, role: guestRole },

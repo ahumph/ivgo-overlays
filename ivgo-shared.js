@@ -18,14 +18,24 @@ const SOCIAL = [
   'TIKTOK · @ivgorchestra',
 ];
 
-const TICKER = {
-  startingSoon: [...EVENTS, ...SOCIAL],
-  game:         [...EVENTS, ...SOCIAL],
-  camera:       [...EVENTS, ...SOCIAL],
-  brb:          [...EVENTS, 'BACK IN A MOMENT', ...SOCIAL],
-  twoCam:       [...EVENTS, 'QUESTIONS WELCOME IN CHAT', ...SOCIAL],
-  ending:       [...EVENTS, 'THANKS FOR WATCHING', ...SOCIAL],
-  arranging:    [...EVENTS, 'WORK ALONG WITH !TASK <TASK> IN CHAT', '!DONE TO TICK OFF A TASK', '!INFO FOR THE CURRENT PIECE', '!POMO TO SEE THE TIMER', ...SOCIAL],
+// Per-scene copy that always runs alongside the live concert announcement.
+// TICKER itself is a Proxy (below _overlayConfig, once that exists) rather
+// than a plain object built once here, so that !nextconcert (see
+// Ivgo.Twitch.Commands.Overlay) can override EVENTS[0] without every scene
+// needing to change how it reads TICKER.<key>.
+const TICKER_EXTRAS = {
+  startingSoon: [],
+  game: [],
+  camera: [],
+  brb: ['BACK IN A MOMENT'],
+  twoCam: ['QUESTIONS WELCOME IN CHAT'],
+  ending: ['THANKS FOR WATCHING'],
+  arranging: [
+    'WORK ALONG WITH !TASK <TASK> IN CHAT',
+    '!DONE TO TICK OFF A TASK',
+    '!INFO FOR THE CURRENT PIECE',
+    '!POMO TO SEE THE TIMER',
+  ],
 };
 
 const T = {
@@ -165,6 +175,68 @@ const _bus = (function () {
 
   return { on, dispatch, joinChannel };
 })();
+
+// ── OverlayConfig ─────────────────────────────────────────────────────────
+// Live-editable overlay content set via mod-only Twitch chat commands
+// (Ivgo.Twitch.Commands.Overlay: !nextconcert, !hostname, !hostrole) and
+// persisted server-side. Joining "overlay:config" pushes the current values
+// immediately over the "state" event (so a scene that just loaded, or just
+// reloaded mid-stream, never shows stale defaults), then "next_concert.
+// updated" / "host.updated" patch it live without needing a reload.
+// Usage: window.IVGO.useOverlayConfig() inside a component - re-renders that
+// component on every change and returns the current
+// {next_concert, host_name, host_role}.
+const _overlayConfig = (function () {
+  let config = { next_concert: '', host_name: null, host_role: null };
+  let listeners = [];
+
+  function apply(patch) {
+    config = Object.assign({}, config, patch);
+    listeners.forEach(fn => {
+      try { fn(config); } catch (e) { console.error('[IVGO overlayConfig]', e); }
+    });
+  }
+
+  function onChange(fn) {
+    listeners.push(fn);
+    return () => { listeners = listeners.filter(l => l !== fn); };
+  }
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('DOMContentLoaded', function () {
+      const handle = _bus.joinChannel('overlay:config');
+      handle.on('state', state => apply(state || {}));
+      handle.on('next_concert.updated', p => apply({ next_concert: p.text }));
+      handle.on('host.updated', p => apply({ host_name: p.name, host_role: p.role }));
+    });
+  }
+
+  return { onChange, get: () => config };
+})();
+
+// React hook wrapping _overlayConfig: subscribes on mount, unsubscribes on
+// unmount, and forces a re-render (not just a returned-value change a
+// component might not otherwise notice, since nothing else here triggers
+// React's reconciler) whenever the config changes.
+function useOverlayConfig() {
+  const [config, setConfig] = React.useState(_overlayConfig.get());
+  React.useEffect(() => _overlayConfig.onChange(setConfig), []);
+  return config;
+}
+
+// TICKER.<key> is computed fresh on every access - a Proxy, not a plain
+// object built once - so a live !nextconcert update is reflected the next
+// time a re-rendering scene reads it, with no separate rebuild step. EVENTS
+// is the fallback shown before any !nextconcert has ever been set.
+const TICKER = new Proxy({}, {
+  get(_target, key) {
+    const extras = TICKER_EXTRAS[key];
+    if (!extras) return undefined;
+    const next = _overlayConfig.get().next_concert;
+    const events = next ? [next] : EVENTS;
+    return [...events, ...extras, ...SOCIAL];
+  }
+});
 
 // ── ToastQueue ────────────────────────────────────────────────────────────
 // Bottom-left toast notifications. Max 3 visible, FIFO queue, 5s auto-dismiss.
@@ -355,8 +427,8 @@ const _toast = (function () {
 //   egg_off    (default false)  set to "1" to disable on this scene entirely.
 const _videoEgg = (function () {
   const CLIPS = {
-    alrighty: { src: '../media/alrighty-then.mp4', w: 480, h: 270, border: T.rule2, priority: 1 },
-    raid:     { src: '../media/raid.mp4',          w: 480, h: 480, border: T.amber, priority: 2 },
+    alrighty: { src: '/overlays/media/alrighty-then.mp4', w: 480, h: 270, border: T.rule2, priority: 1 },
+    raid:     { src: '/overlays/media/raid.mp4',          w: 480, h: 480, border: T.amber, priority: 2 },
   };
 
   const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : null;
@@ -483,7 +555,7 @@ const _videoEgg = (function () {
 // (z-index 9) and HeaderBar (5) so the alert UI stays on top, but above
 // the scene background. Plays with audio.
 const _raidBackdrop = (function () {
-  const SRC = '../media/WeeManRaid.mp4';
+  const SRC = '/overlays/media/WeeManRaid.mp4';
   const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : null;
   const DISABLED = params && params.get('raid_bg_off') === '1';
 
@@ -614,7 +686,7 @@ const _micMute = (function () {
   function showMuted() {
     ensureMounted();
     if (fadeTimer) { clearTimeout(fadeTimer); fadeTimer = null; }
-    imgEl.src = '../media/mute.png';
+    imgEl.src = '/overlays/media/mute.png';
     containerEl.style.transition = 'opacity 200ms ease';
     containerEl.style.opacity = '1';
   }
@@ -622,7 +694,7 @@ const _micMute = (function () {
   function showUnmutedThenFade() {
     ensureMounted();
     if (fadeTimer) { clearTimeout(fadeTimer); fadeTimer = null; }
-    imgEl.src = '../media/microphone.png';
+    imgEl.src = '/overlays/media/microphone.png';
     containerEl.style.transition = 'opacity 200ms ease';
     containerEl.style.opacity = '1';
     fadeTimer = setTimeout(() => {
@@ -1081,7 +1153,7 @@ function Ticker({items}) {
       flexShrink:0, padding:'0 20px', height:'100%', display:'flex', alignItems:'center',
       borderRight:`1px solid ${T.rule2}`
     }},
-      React.createElement('img', {src:'../brand-assets/IVGO_w.png', style:{height:18, display:'block'}, alt:'IVGO'})
+      React.createElement('img', {src:'/overlays/brand-assets/IVGO_w.png', style:{height:18, display:'block'}, alt:'IVGO'})
     ),
     React.createElement('div', {style:{flex:1,overflow:'hidden',position:'relative'}},
       React.createElement('div', {className:'ovl-ticker-track', style:{paddingLeft:24,fontFamily:T.mono,fontSize:11,letterSpacing:'.18em',color:T.ink2,textTransform:'uppercase'}},
@@ -1424,4 +1496,5 @@ window.IVGO = {
   WorkbenchStrip, SprintTimer, TaskBar, TaskList,
   bus: _bus,
   toast: _toast.toast,
+  useOverlayConfig,
 };

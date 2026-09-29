@@ -18,10 +18,11 @@
 
 <script>
 (function () {
-  const { Scene, UtilityRail, HeaderBar, Ticker, TICKER } = window.IVGO;
+  const { Scene, UtilityRail, HeaderBar, Ticker, TICKER, useOverlayConfig } = window.IVGO;
   const e = React.createElement;
 
   function SceneGame() {
+    useOverlayConfig(); // subscribes to live !nextconcert updates
     return e(Scene, { label: '02 Game', transparent: true },
       e(UtilityRail),
       e(HeaderBar),
