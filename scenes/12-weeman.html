@@ -316,35 +316,23 @@
   setInterval(persist, 30000);
 
   // ── Chat ────────────────────────────────────────────────────────────────
-  // Parsing is split from transport so the routing can be exercised without a
-  // live socket.
-  function handleChatLine(line) {
-    if (!line.includes('PRIVMSG')) return;
+  // window.IVGO.watchTwitchChat (ivgo-shared.js) owns the IRC connection,
+  // bot filtering (Streamlabs/Nightbot/Sery_Bot) and the 5s spam hold -
+  // onMessage only fires for a message that wasn't deleted by AutoMod/a mod
+  // in that window. Mod commands go through onCommand instead, which fires
+  // immediately: !hiss/!weemanclear are deliberate mod actions, not spam,
+  // and a 5s lag on them would feel broken.
+  window.IVGO.watchTwitchChat(CHANNEL, {
+    onCommand: (m) => {
+      if (!m.isMod) return;
 
-    const tags = {};
-    if (line.startsWith('@')) {
-      line.slice(1, line.indexOf(' ')).split(';').forEach(t => {
-        const eq = t.indexOf('=');
-        tags[t.slice(0, eq)] = t.slice(eq + 1);
-      });
-    }
-    const m = line.match(/PRIVMSG #\S+ :(.+)$/);
-    if (!m) return;
-
-    const text   = m[1].trim();
-    const badges = tags['badges'] || '';
-    const isMod  = tags['mod'] === '1' || badges.indexOf('broadcaster/') !== -1;
-    const name   = tags['display-name'] || 'viewer';
-    const key    = name.toLowerCase();
-
-    if (isMod) {
-      if (CLEAR_RE.test(text)) {
+      if (CLEAR_RE.test(m.text)) {
         roster.forEach(sendHome);
         console.log('[IVGO weeman] cleared by mod');
         return;
       }
 
-      const hiss = text.match(HISS_RE);
+      const hiss = m.text.match(HISS_RE);
       if (hiss) {
         if (hiss[1]) {
           infect(hiss[1].toLowerCase());
@@ -353,56 +341,26 @@
           infectAll();
           console.log('[IVGO weeman] hiss -> all');
         }
+      }
+    },
+    onMessage: (m) => {
+      const key = m.name.toLowerCase();
+
+      if (SUMMON_RE.test(m.text)) {
+        summon(key, m.name, m.color);
         return;
       }
-    }
 
-    if (SUMMON_RE.test(text)) {
-      summon(key, name, tags['color']);
-      return;
-    }
-
-    // Auto-summon: anyone who chats gets their own WeeMan on screen, no
-    // command needed - summon() already tops the timer back up rather than
-    // spawning a duplicate if theirs is already out, so this also means a
-    // WeeMan stays out for as long as its viewer keeps chatting. !weeman
-    // above still works too, for someone who wants to appear without saying
-    // anything else.
-    summon(key, name, tags['color']);
-    say(key, text);
-  }
-
-  (function connectChat() {
-    let retryMs = 2000;
-    let ws;
-
-    function open() {
-      ws = new WebSocket('wss://irc-ws.chat.twitch.tv');
-
-      ws.onopen = () => {
-        retryMs = 2000;
-        ws.send('CAP REQ :twitch.tv/tags');
-        ws.send('PASS SCHMOOPIIE');
-        ws.send('NICK justinfan' + Math.floor(Math.random() * 99999));
-        ws.send('JOIN #' + CHANNEL);
-      };
-
-      ws.onmessage = (ev) => {
-        ev.data.split('\r\n').filter(Boolean).forEach(line => {
-          if (line.startsWith('PING')) { ws.send('PONG :tmi.twitch.tv'); return; }
-          handleChatLine(line);
-        });
-      };
-
-      ws.onclose = () => {
-        setTimeout(open, retryMs);
-        retryMs = Math.min(retryMs * 2, 30000);
-      };
-      ws.onerror = () => { try { ws.close(); } catch (_) {} };
-    }
-
-    open();
-  })();
+      // Auto-summon: anyone who chats gets their own WeeMan on screen, no
+      // command needed - summon() already tops the timer back up rather than
+      // spawning a duplicate if theirs is already out, so this also means a
+      // WeeMan stays out for as long as its viewer keeps chatting. !weeman
+      // above still works too, for someone who wants to appear without saying
+      // anything else.
+      summon(key, m.name, m.color);
+      say(key, m.text);
+    },
+  });
 
   // ── Events ──────────────────────────────────────────────────────────────
   // The cast reacts to the same alerts the rest of the overlay shows.

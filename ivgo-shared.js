@@ -1054,45 +1054,160 @@ function NowPlayingStrip({game = 'FINAL FANTASY VII REBIRTH', track = "AERITH'S 
   );
 }
 
-function ChatPanel({channel = 'irishvideogameorchestra', style={}}) {
-  const [messages, setMessages] = React.useState([]);
-  const [connected, setConnected] = React.useState(false);
+// Anonymous read-only Twitch IRC chat reader, shared by ChatPanel below and
+// 12-weeman.html (which also needs the raw feed, for its own mod commands).
+// Two things every consumer of raw chat wants, in one place instead of
+// copy-pasted per overlay:
+//
+//   - Bot accounts never show up or trigger anything - they're not real
+//     chatters and would otherwise spam a WeeMan onto screen or clutter the
+//     chat panel every time they post.
+//   - A held-out 5s window before a message "counts", so a message AutoMod
+//     or a mod deletes gets to disappear before it was ever shown. Twitch
+//     sends CLEARMSG (one message, by id) and CLEARCHAT (one user's
+//     messages, or - with no username - a full chat clear) for exactly
+//     this; holding every message for 5s and dropping it if one of those
+//     arrives in that window is what "ignore spam" means here, since there
+//     is no faster signal than the mods/AutoMod actually acting on it.
+//
+// onCommand (if given) fires immediately, unfiltered by the hold, for a
+// caller that needs to react to mod commands/instructions right away rather
+// than 5s late - the hold only applies to onMessage.
+const _CHAT_BOT_LOGINS = new Set(['streamlabs', 'nightbot', 'sery_bot']);
+const _CHAT_SPAM_HOLD_MS = 5000;
 
-  React.useEffect(() => {
-    const ws = new WebSocket('wss://irc-ws.chat.twitch.tv');
+function watchTwitchChat(channel, {onMessage, onCommand, onStatus} = {}) {
+  let ws;
+  let closed = false;
+  let retryMs = 2000;
+  const pending = new Map(); // msg id -> {timer, login}
+
+  function settle(id) {
+    const rec = pending.get(id);
+    if (!rec) return;
+    clearTimeout(rec.timer);
+    pending.delete(id);
+  }
+
+  function clearForUser(login) {
+    pending.forEach((rec, id) => { if (rec.login === login) settle(id); });
+  }
+
+  function clearAll() {
+    pending.forEach(rec => clearTimeout(rec.timer));
+    pending.clear();
+  }
+
+  function parseTags(line) {
+    const tags = {};
+    if (line.startsWith('@')) {
+      line.slice(1, line.indexOf(' ')).split(';').forEach(t => {
+        const eq = t.indexOf('=');
+        tags[t.slice(0, eq)] = t.slice(eq + 1);
+      });
+    }
+    return tags;
+  }
+
+  function handleLine(line) {
+    if (line.startsWith('PING')) { ws.send('PONG :tmi.twitch.tv'); return; }
+
+    const tags = parseTags(line);
+
+    if (line.includes('CLEARMSG')) {
+      if (tags['target-msg-id']) settle(tags['target-msg-id']);
+      return;
+    }
+
+    if (line.includes('CLEARCHAT')) {
+      const m = line.match(/CLEARCHAT #\S+(?: :(\S+))?/);
+      if (m && m[1]) clearForUser(m[1].toLowerCase()); else clearAll();
+      return;
+    }
+
+    if (!line.includes('PRIVMSG')) {
+      if (onStatus && (line.includes(' 376 ') || line.includes('JOIN #'))) onStatus(true);
+      return;
+    }
+
+    // Login lives in the IRC prefix (":nick!user@host"), not in the tags -
+    // display-name can differ in case/spacing and isn't what a bot's
+    // account is actually named.
+    let rest = line;
+    if (rest.startsWith('@')) rest = rest.slice(rest.indexOf(' ') + 1);
+    const loginMatch = rest.match(/^:([^!]+)!/);
+    const login = (loginMatch ? loginMatch[1] : (tags['display-name'] || '')).toLowerCase();
+    if (_CHAT_BOT_LOGINS.has(login)) return;
+
+    const msgMatch = line.match(/PRIVMSG #\S+ :(.+)$/);
+    if (!msgMatch) return;
+
+    const badges = tags['badges'] || '';
+    const parsed = {
+      id: tags['id'] || Math.random().toString(36),
+      login,
+      name: tags['display-name'] || login || 'viewer',
+      color: tags['color'],
+      text: msgMatch[1],
+      isMod: tags['mod'] === '1' || badges.indexOf('broadcaster/') !== -1,
+    };
+
+    if (onCommand) onCommand(parsed);
+    if (!onMessage) return;
+
+    const timer = setTimeout(() => {
+      pending.delete(parsed.id);
+      onMessage(parsed);
+    }, _CHAT_SPAM_HOLD_MS);
+    pending.set(parsed.id, {timer, login});
+  }
+
+  function open() {
+    ws = new WebSocket('wss://irc-ws.chat.twitch.tv');
     ws.onopen = () => {
+      retryMs = 2000;
       ws.send('CAP REQ :twitch.tv/tags');
       ws.send('PASS SCHMOOPIIE');
       ws.send('NICK justinfan' + Math.floor(Math.random() * 99999));
       ws.send('JOIN #' + channel.toLowerCase());
     };
-    ws.onmessage = (ev) => {
-      ev.data.split('\r\n').filter(Boolean).forEach(line => {
-        if (line.startsWith('PING')) { ws.send('PONG :tmi.twitch.tv'); return; }
-        if (!line.includes('PRIVMSG')) {
-          if (line.includes(' 376 ') || line.includes('JOIN #')) setConnected(true);
-          return;
-        }
-        const tags = {};
-        if (line.startsWith('@')) {
-          line.slice(1, line.indexOf(' ')).split(';').forEach(t => {
-            const eq = t.indexOf('=');
-            tags[t.slice(0, eq)] = t.slice(eq + 1);
-          });
-        }
-        const msgMatch = line.match(/PRIVMSG #\S+ :(.+)$/);
-        if (!msgMatch) return;
-        const name = tags['display-name'] || 'viewer';
-        setMessages(prev => [...prev.slice(-29), {
-          id: tags['id'] || Math.random().toString(36),
-          u: name,
-          c: tags['color'] || _chatColor(name),
-          t: msgMatch[1],
-        }]);
-      });
+    ws.onmessage = (ev) => ev.data.split('\r\n').filter(Boolean).forEach(handleLine);
+    ws.onclose = () => {
+      clearAll();
+      if (onStatus) onStatus(false);
+      if (closed) return;
+      setTimeout(open, retryMs);
+      retryMs = Math.min(retryMs * 2, 30000);
     };
-    ws.onclose = () => setConnected(false);
-    return () => ws.close();
+    ws.onerror = () => { try { ws.close(); } catch (_) {} };
+  }
+
+  open();
+
+  return () => {
+    closed = true;
+    clearAll();
+    if (ws) ws.close();
+  };
+}
+
+function ChatPanel({channel = 'irishvideogameorchestra', style={}}) {
+  const [messages, setMessages] = React.useState([]);
+  const [connected, setConnected] = React.useState(false);
+
+  React.useEffect(() => {
+    const stop = watchTwitchChat(channel, {
+      onStatus: setConnected,
+      onMessage: (m) => {
+        setMessages(prev => [...prev.slice(-29), {
+          id: m.id,
+          u: m.name,
+          c: m.color || _chatColor(m.name),
+          t: m.text,
+        }]);
+      },
+    });
+    return stop;
   }, [channel]);
 
   return React.createElement('div', {className:'ovl-chamfer', style:{
@@ -1494,6 +1609,7 @@ window.IVGO = {
   UtilityRail, CornerTrim, MediaPlaceholder,
   NowPlayingStrip, ChatPanel, GoalBar, Ticker, HeaderBar, Scene,
   WorkbenchStrip, SprintTimer, TaskBar, TaskList,
+  watchTwitchChat,
   bus: _bus,
   toast: _toast.toast,
   useOverlayConfig,
