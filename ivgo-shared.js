@@ -1073,7 +1073,7 @@ function NowPlayingStrip({game = 'FINAL FANTASY VII REBIRTH', track = "AERITH'S 
 // onCommand (if given) fires immediately, unfiltered by the hold, for a
 // caller that needs to react to mod commands/instructions right away rather
 // than 5s late - the hold only applies to onMessage.
-const _CHAT_BOT_LOGINS = new Set(['streamlabs', 'nightbot', 'sery_bot']);
+const _CHAT_BOT_LOGINS = new Set(['streamlabs', 'nightbot', 'sery_bot', 'pokemoncommunitygame']);
 const _CHAT_SPAM_HOLD_MS = 5000;
 
 function watchTwitchChat(channel, {onMessage, onCommand, onStatus} = {}) {
