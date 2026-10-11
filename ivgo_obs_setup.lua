@@ -87,14 +87,19 @@ local function pull_latest()
     -- If the rebase hits a conflict, git leaves the repo mid-rebase — we
     -- surface that in the log and the user resolves with `git status` /
     -- `git rebase --abort` from a terminal.
+    --
+    -- Returns ok, changed. OBS keeps running the script it loaded until it's
+    -- reloaded, so a pull that brought in new code can't use it yet.
     print("[IVGO] Pulling latest…")
+    local _, before = run_git("rev-parse HEAD")
     local ok, output = run_git("pull --rebase --autostash")
     if output ~= "" then print("[IVGO] git pull:\n" .. output) end
     if not ok then
         print("[IVGO] git pull failed — check `git status` and resolve manually.")
-        return false
+        return false, false
     end
-    return true
+    local _, after = run_git("rev-parse HEAD")
+    return true, before ~= after
 end
 
 -- ── OBS source / scene helpers ────────────────────────────────────────────────
@@ -1587,7 +1592,18 @@ function script_properties()
         function(_, _) build_all(); return true end)
 
     obs.obs_properties_add_button(props, "btn_pull", "Pull latest & refresh",
-        function(_, _) pull_latest(); build_all(); return true end)
+        function(_, _)
+            local ok, changed = pull_latest()
+            if ok and changed then
+                -- The new script isn't loaded yet; building now would use the
+                -- old one and miss anything new (scenes, settings).
+                print("[IVGO] Updated. Reload this script (Tools > Scripts, the reload button) " ..
+                      "to use the new version, then click Create / Refresh Scenes.")
+            elseif ok then
+                build_all()
+            end
+            return true
+        end)
 
     return props
 end
