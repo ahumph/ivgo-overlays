@@ -884,10 +884,42 @@ local function make_remote_feed(name)
     return src
 end
 
--- Source rectangles {x, y, w, h} for the two interview layouts. They must
+-- The preroll / BRB video: a YouTube link plays in a browser source using
+-- YouTube's embed player; anything else is a local file for a media
+-- source. Either loops, restarts each time its scene comes on, and its
+-- sound goes to the mixer. Returns nil when no video is set.
+local function youtube_id(link)
+    return link:match("[?&]v=([%w_-]+)") or link:match("youtu%.be/([%w_-]+)")
+        or link:match("/embed/([%w_-]+)") or link:match("/shorts/([%w_-]+)")
+end
+
+local function make_preroll(video)
+    if not video or video == "" then return nil end
+    local id = youtube_id(video)
+    if id then
+        local url = "https://www.youtube.com/embed/" .. id ..
+            "?autoplay=1&loop=1&playlist=" .. id .. "&controls=0&rel=0&modestbranding=1"
+        local src = make_browser("IVGO: Preroll (YouTube)", url)
+        if src then configure_audio_source(src) end
+        return src
+    end
+    return make_media("IVGO: Preroll (File)", video)
+end
+
+-- Source rectangles {x, y, w, h} for the interview layouts. They must
 -- match LAYOUTS in ivgo-ex's priv/static/overlays/scenes/17-interview.html,
 -- which draws the frames and nameplates around them.
 local INTERVIEW_LAYOUTS = {
+    starting = {
+        preroll     = {24, 74, 1360, 765},
+    },
+    welcome = {
+        interviewer = {14, 66, 940, 529},
+        player      = {966, 66, 940, 529},
+    },
+    brb = {
+        preroll     = {24, 74, 1360, 765},
+    },
     talk = {
         game        = {14, 607, 756, 425},
         player      = {518, 885, 240, 135},
@@ -902,41 +934,48 @@ local INTERVIEW_LAYOUTS = {
     },
 }
 
-local function build_interview_scene(scene_name, layout, back, overlay, base, socket_url, np_base)
-    -- Layer order bottom -> top:
+local function build_interview_scene(scene_name, layout, back, overlay, preroll, base, socket_url, np_base)
+    -- Layer order bottom -> top, each only where the layout has a place
+    -- for it (INTERVIEW_LAYOUTS):
     --   1. 17-interview.html?layer=back   branded background
-    --   2. Game Capture
-    --   3. Host Camera (the player, inset on the game)
-    --   4. Interviewer and Interview Guest (remote feeds)
-    --   5. 17-interview.html   frames, nameplates, chat, donations, chrome
+    --   2. Preroll video
+    --   3. Game Capture
+    --   4. Host Camera (the player)
+    --   5. Interviewer and Interview Guest (remote feeds)
+    --   6. 17-interview.html   frames, nameplates, chat, donations, chrome
     local scene_src = get_scene_source(scene_name)
     local scene     = obs.obs_scene_from_source(scene_src)
     local r         = INTERVIEW_LAYOUTS[layout]
 
+    local function put(source, rect)
+        if source and rect then place(scene, source, rect[1], rect[2], rect[3], rect[4]) end
+    end
+
     place(scene, back, 0, 0, 1920, 1080)
+    put(preroll, r.preroll)
 
-    local game = make_game_capture("IVGO: Game Capture")
-    if game then
-        place(scene, game, r.game[1], r.game[2], r.game[3], r.game[4])
-        obs.obs_source_release(game)
+    if r.game then
+        local game = make_game_capture("IVGO: Game Capture")
+        put(game, r.game)
+        if game then obs.obs_source_release(game) end
     end
 
-    local cam = make_capture("IVGO: Host Camera", cam_type())
-    if cam then
-        place(scene, cam, r.player[1], r.player[2], r.player[3], r.player[4])
-        obs.obs_source_release(cam)
+    if r.player then
+        local cam = make_capture("IVGO: Host Camera", cam_type())
+        put(cam, r.player)
+        if cam then obs.obs_source_release(cam) end
     end
 
-    local interviewer = make_remote_feed("IVGO: Interviewer")
-    if interviewer then
-        place(scene, interviewer, r.interviewer[1], r.interviewer[2], r.interviewer[3], r.interviewer[4])
-        obs.obs_source_release(interviewer)
+    if r.interviewer then
+        local interviewer = make_remote_feed("IVGO: Interviewer")
+        put(interviewer, r.interviewer)
+        if interviewer then obs.obs_source_release(interviewer) end
     end
 
-    local guest = make_remote_feed("IVGO: Interview Guest")
-    if guest then
-        place(scene, guest, r.guest[1], r.guest[2], r.guest[3], r.guest[4])
-        obs.obs_source_release(guest)
+    if r.guest then
+        local guest = make_remote_feed("IVGO: Interview Guest")
+        put(guest, r.guest)
+        if guest then obs.obs_source_release(guest) end
     end
 
     place(scene, overlay, 0, 0, 1920, 1080)
@@ -951,18 +990,20 @@ local function build_interview_scene(scene_name, layout, back, overlay, base, so
     obs.obs_source_release(scene_src)
 end
 
-local function build_interview(base, interviewer, interviewer_role, guest, g_role, player, socket_url, np_base)
-    -- Two scenes, one overlay: "IVGO · 17 Interview" (the conversation
-    -- large) and "IVGO · 17 Interview (Game)" (the game large). The same
-    -- overlay and background sources sit in both, so the chat panel never
-    -- reloads and alerts play once; the overlay reads the live scene's name
-    -- and draws the matching layout. Bind a hotkey to each scene in
-    -- Settings > Hotkeys to switch.
+local function build_interview(base, interviewer, interviewer_role, guest, g_role, guest_credit, player, preroll_video, countdown_mins, socket_url, np_base)
+    -- Five scenes, one overlay: starting soon, welcome, the interview (the
+    -- conversation large), the interview with the game large, and be right
+    -- back. The same overlay and background sources sit in all of them, so
+    -- the chat panel never reloads and alerts play once; the overlay reads
+    -- the live scene's name and draws the matching layout. Bind a hotkey to
+    -- each scene in Settings > Hotkeys to switch.
     local params = "interviewer="      .. urlencode(interviewer)      ..
                    "&interviewerRole=" .. urlencode(interviewer_role) ..
                    "&guest="           .. urlencode(guest)            ..
                    "&guestRole="       .. urlencode(g_role)           ..
+                   "&guestCredit="     .. urlencode(guest_credit)     ..
                    "&player="          .. urlencode(player)           ..
+                   "&mins="            .. tostring(countdown_mins)    ..
                    "&mic=1&egg_off=1"
 
     local back = make_browser("IVGO: Interview Background", base .. "/interview?layer=back")
@@ -980,9 +1021,15 @@ local function build_interview(base, interviewer, interviewer_role, guest, g_rol
     obs.obs_source_update(overlay, d)
     obs.obs_data_release(d)
 
-    build_interview_scene("IVGO · 17 Interview",        "talk", back, overlay, base, socket_url, np_base)
-    build_interview_scene("IVGO · 17 Interview (Game)", "game", back, overlay, base, socket_url, np_base)
+    local preroll = make_preroll(preroll_video)
 
+    build_interview_scene("IVGO · 17 Interview · Starting Soon", "starting", back, overlay, preroll, base, socket_url, np_base)
+    build_interview_scene("IVGO · 17 Interview · Welcome",       "welcome",  back, overlay, preroll, base, socket_url, np_base)
+    build_interview_scene("IVGO · 17 Interview · Talk",          "talk",     back, overlay, preroll, base, socket_url, np_base)
+    build_interview_scene("IVGO · 17 Interview · Game",          "game",     back, overlay, preroll, base, socket_url, np_base)
+    build_interview_scene("IVGO · 17 Interview · Be Right Back", "brb",      back, overlay, preroll, base, socket_url, np_base)
+
+    if preroll then obs.obs_source_release(preroll) end
     obs.obs_source_release(back)
     obs.obs_source_release(overlay)
 end
@@ -1153,6 +1200,8 @@ local function build_all()
     local np_base        = obs.obs_data_get_string(settings_ref, "now_playing_http_base")
     local interviewer      = obs.obs_data_get_string(settings_ref, "interviewer_name")
     local interviewer_role = obs.obs_data_get_string(settings_ref, "interviewer_role")
+    local guest_credit     = obs.obs_data_get_string(settings_ref, "guest_credit")
+    local preroll_video    = obs.obs_data_get_string(settings_ref, "preroll_video")
 
     local arr_piece         = obs.obs_data_get_string(settings_ref, "arr_piece")
     local arr_collection    = obs.obs_data_get_string(settings_ref, "arr_collection")
@@ -1167,11 +1216,16 @@ local function build_all()
     build_camera(base, host, host_role, socket_url, np_base)
     build_brb(base, socket_url, np_base)
     build_two_cam(base, host, host_role, guest, g_role, topic, socket_url, np_base)
-    build_interview(base, interviewer, interviewer_role, guest, g_role, host, socket_url, np_base)
+    -- Only for interview shows: off unless ticked, so other streamers'
+    -- scene lists don't fill up with scenes they'll never use.
+    local interviews = obs.obs_data_get_bool(settings_ref, "interview_scenes")
+    if interviews then
+        build_interview(base, interviewer, interviewer_role, guest, g_role, guest_credit, host, preroll_video, countdown_mins, socket_url, np_base)
+    end
     build_ending(base, socket_url, np_base)
     build_arranging(base, arr_piece, arr_collection, arr_sprints_total, arr_focus_mins, arr_break_mins, socket_url, np_base)
 
-    print("[IVGO] Done — 9 scenes created / refreshed.")
+    print("[IVGO] Done — " .. (interviews and 12 or 7) .. " scenes created / refreshed.")
 end
 
 -- ── Now-Playing watcher auto-start ────────────────────────────────────────────
@@ -1378,8 +1432,11 @@ function script_defaults(settings)
     obs.obs_data_set_default_string(settings, "guest_name", "GUEST NAME")
     obs.obs_data_set_default_string(settings, "guest_role", "ROLE")
     obs.obs_data_set_default_string(settings, "topic",      "WHY VIDEO GAME MUSIC DESERVES A FULL ORCHESTRA")
+    obs.obs_data_set_default_bool  (settings, "interview_scenes", false)
     obs.obs_data_set_default_string(settings, "interviewer_name", "PHOEBE")
     obs.obs_data_set_default_string(settings, "interviewer_role", "HOST")
+    obs.obs_data_set_default_string(settings, "guest_credit",     "")
+    obs.obs_data_set_default_string(settings, "preroll_video",    "")
     obs.obs_data_set_default_int   (settings, "countdown_mins", 5)
     obs.obs_data_set_default_string(settings, "socket_url", "wss://ivgorchestra.fly.dev/overlay")
     obs.obs_data_set_default_string(settings, "now_playing_http_base", "http://localhost:7779")
@@ -1422,10 +1479,22 @@ function script_properties()
     obs.obs_properties_add_text(props, "_guest_role_hint",
         "Two-Camera and Interview scenes.",
         obs.OBS_TEXT_INFO)
+    obs.obs_properties_add_bool(props, "interview_scenes", "Interview scenes (IVGO · 17 Interview ...)")
+    obs.obs_properties_add_text(props, "_interview_scenes_hint",
+        "Only for interview shows: starting soon, welcome, talk, game and be right back, with remote feeds for the interviewer and guest. Leave unticked otherwise. Unticking doesn't delete scenes already made; remove those in OBS.",
+        obs.OBS_TEXT_INFO)
     obs.obs_properties_add_text(props, "interviewer_name", "Interviewer name", obs.OBS_TEXT_DEFAULT)
     obs.obs_properties_add_text(props, "interviewer_role", "Interviewer role", obs.OBS_TEXT_DEFAULT)
     obs.obs_properties_add_text(props, "_interviewer_hint",
         "Interview scenes only. The guest name and role above are used there too, and your host name labels the game.",
+        obs.OBS_TEXT_INFO)
+    obs.obs_properties_add_text(props, "guest_credit", "Guest credit", obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_text(props, "_guest_credit_hint",
+        "Under the guest's name on the interview's starting-soon and be-right-back scenes, e.g. Resident Evil / Leon S. Kennedy.",
+        obs.OBS_TEXT_INFO)
+    obs.obs_properties_add_text(props, "preroll_video", "Interview preroll video", obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_text(props, "_preroll_hint",
+        "A YouTube link, or the full path of a video file. Plays on the interview's starting-soon and be-right-back scenes.",
         obs.OBS_TEXT_INFO)
     obs.obs_properties_add_text(props, "topic",      "Topic",      obs.OBS_TEXT_DEFAULT)
     obs.obs_properties_add_text(props, "_topic_hint",
