@@ -862,6 +862,131 @@ local function build_two_cam(base, host, host_role, guest, g_role, topic, socket
     obs.obs_source_release(scene_src)
 end
 
+-- Remote feed for an interview (a VDO.Ninja view link, say): a browser
+-- source whose URL is pasted into its Properties once. Unlike make_browser,
+-- an existing one keeps that URL on every re-run. Its audio goes to the
+-- mixer and stays running while hidden, so the call never drops on a
+-- scene switch.
+local function make_remote_feed(name)
+    local existing = obs.obs_get_source_by_name(name)
+    if existing then return existing end
+    local d = obs.obs_data_create()
+    obs.obs_data_set_string(d, "url",           "")
+    obs.obs_data_set_int   (d, "width",         1920)
+    obs.obs_data_set_int   (d, "height",        1080)
+    obs.obs_data_set_bool  (d, "reroute_audio", true)
+    obs.obs_data_set_bool  (d, "shutdown",      false)
+    local src = obs.obs_source_create("browser_source", name, d, nil)
+    obs.obs_data_release(d)
+    if src then
+        obs.obs_source_set_monitoring_type(src, obs.OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT)
+    end
+    return src
+end
+
+-- Source rectangles {x, y, w, h} for the two interview layouts. They must
+-- match LAYOUTS in ivgo-ex's priv/static/overlays/scenes/17-interview.html,
+-- which draws the frames and nameplates around them.
+local INTERVIEW_LAYOUTS = {
+    talk = {
+        game        = {14, 607, 756, 425},
+        player      = {518, 885, 240, 135},
+        interviewer = {14, 66, 940, 529},
+        guest       = {966, 66, 940, 529},
+    },
+    game = {
+        game        = {10, 66, 1440, 810},
+        player      = {1116, 682, 320, 180},
+        interviewer = {1462, 330, 448, 252},
+        guest       = {1462, 66, 448, 252},
+    },
+}
+
+local function build_interview_scene(scene_name, layout, back, overlay, base, socket_url, np_base)
+    -- Layer order bottom -> top:
+    --   1. 17-interview.html?layer=back   branded background
+    --   2. Game Capture
+    --   3. Host Camera (the player, inset on the game)
+    --   4. Interviewer and Interview Guest (remote feeds)
+    --   5. 17-interview.html   frames, nameplates, chat, donations, chrome
+    local scene_src = get_scene_source(scene_name)
+    local scene     = obs.obs_scene_from_source(scene_src)
+    local r         = INTERVIEW_LAYOUTS[layout]
+
+    place(scene, back, 0, 0, 1920, 1080)
+
+    local game = make_game_capture("IVGO: Game Capture")
+    if game then
+        place(scene, game, r.game[1], r.game[2], r.game[3], r.game[4])
+        obs.obs_source_release(game)
+    end
+
+    local cam = make_capture("IVGO: Host Camera", cam_type())
+    if cam then
+        place(scene, cam, r.player[1], r.player[2], r.player[3], r.player[4])
+        obs.obs_source_release(cam)
+    end
+
+    local interviewer = make_remote_feed("IVGO: Interviewer")
+    if interviewer then
+        place(scene, interviewer, r.interviewer[1], r.interviewer[2], r.interviewer[3], r.interviewer[4])
+        obs.obs_source_release(interviewer)
+    end
+
+    local guest = make_remote_feed("IVGO: Interview Guest")
+    if guest then
+        place(scene, guest, r.guest[1], r.guest[2], r.guest[3], r.guest[4])
+        obs.obs_source_release(guest)
+    end
+
+    place(scene, overlay, 0, 0, 1920, 1080)
+
+    build_help(scene, base, socket_url, np_base)
+    build_weeman(scene, base, socket_url)
+    build_clip(scene, base, socket_url)
+    build_fire(scene, base, socket_url)
+    build_card_pull(scene, base, socket_url)
+    build_redact(scene, base, socket_url)
+    build_resonance(scene, base, socket_url)
+    obs.obs_source_release(scene_src)
+end
+
+local function build_interview(base, interviewer, interviewer_role, guest, g_role, player, socket_url, np_base)
+    -- Two scenes, one overlay: "IVGO · 17 Interview" (the conversation
+    -- large) and "IVGO · 17 Interview (Game)" (the game large). The same
+    -- overlay and background sources sit in both, so the chat panel never
+    -- reloads and alerts play once; the overlay reads the live scene's name
+    -- and draws the matching layout. Bind a hotkey to each scene in
+    -- Settings > Hotkeys to switch.
+    local params = "interviewer="      .. urlencode(interviewer)      ..
+                   "&interviewerRole=" .. urlencode(interviewer_role) ..
+                   "&guest="           .. urlencode(guest)            ..
+                   "&guestRole="       .. urlencode(g_role)           ..
+                   "&player="          .. urlencode(player)           ..
+                   "&mic=1&egg_off=1"
+
+    local back = make_browser("IVGO: Interview Background", base .. "/interview?layer=back")
+    local overlay = make_browser("IVGO: Interview Overlay", append_socket_url(base .. "/interview?" .. params, socket_url))
+    if not (back and overlay) then
+        print("[IVGO] Warning: could not create the interview overlay sources")
+        return
+    end
+
+    -- Keep running across the switch, and let the page read which scene
+    -- is live (page permissions: read access to user information).
+    configure_stateful_source(overlay)
+    local d = obs.obs_source_get_settings(overlay)
+    obs.obs_data_set_int(d, "webpage_control_level", 2)
+    obs.obs_source_update(overlay, d)
+    obs.obs_data_release(d)
+
+    build_interview_scene("IVGO · 17 Interview",        "talk", back, overlay, base, socket_url, np_base)
+    build_interview_scene("IVGO · 17 Interview (Game)", "game", back, overlay, base, socket_url, np_base)
+
+    obs.obs_source_release(back)
+    obs.obs_source_release(overlay)
+end
+
 local function build_ending(base, socket_url, np_base)
     local scene_src = get_scene_source("IVGO · 06 Ending")
     local scene     = obs.obs_scene_from_source(scene_src)
@@ -1026,6 +1151,8 @@ local function build_all()
     local countdown_mins = obs.obs_data_get_int   (settings_ref, "countdown_mins")
     local socket_url     = obs.obs_data_get_string(settings_ref, "socket_url")
     local np_base        = obs.obs_data_get_string(settings_ref, "now_playing_http_base")
+    local interviewer      = obs.obs_data_get_string(settings_ref, "interviewer_name")
+    local interviewer_role = obs.obs_data_get_string(settings_ref, "interviewer_role")
 
     local arr_piece         = obs.obs_data_get_string(settings_ref, "arr_piece")
     local arr_collection    = obs.obs_data_get_string(settings_ref, "arr_collection")
@@ -1040,10 +1167,11 @@ local function build_all()
     build_camera(base, host, host_role, socket_url, np_base)
     build_brb(base, socket_url, np_base)
     build_two_cam(base, host, host_role, guest, g_role, topic, socket_url, np_base)
+    build_interview(base, interviewer, interviewer_role, guest, g_role, host, socket_url, np_base)
     build_ending(base, socket_url, np_base)
     build_arranging(base, arr_piece, arr_collection, arr_sprints_total, arr_focus_mins, arr_break_mins, socket_url, np_base)
 
-    print("[IVGO] Done — 7 scenes created / refreshed.")
+    print("[IVGO] Done — 9 scenes created / refreshed.")
 end
 
 -- ── Now-Playing watcher auto-start ────────────────────────────────────────────
@@ -1250,6 +1378,8 @@ function script_defaults(settings)
     obs.obs_data_set_default_string(settings, "guest_name", "GUEST NAME")
     obs.obs_data_set_default_string(settings, "guest_role", "ROLE")
     obs.obs_data_set_default_string(settings, "topic",      "WHY VIDEO GAME MUSIC DESERVES A FULL ORCHESTRA")
+    obs.obs_data_set_default_string(settings, "interviewer_name", "PHOEBE")
+    obs.obs_data_set_default_string(settings, "interviewer_role", "HOST")
     obs.obs_data_set_default_int   (settings, "countdown_mins", 5)
     obs.obs_data_set_default_string(settings, "socket_url", "wss://ivgorchestra.fly.dev/overlay")
     obs.obs_data_set_default_string(settings, "now_playing_http_base", "http://localhost:7779")
@@ -1286,11 +1416,16 @@ function script_properties()
         obs.OBS_TEXT_INFO)
     obs.obs_properties_add_text(props, "guest_name", "Guest name", obs.OBS_TEXT_DEFAULT)
     obs.obs_properties_add_text(props, "_guest_name_hint",
-        "Two-Camera scene only.",
+        "Two-Camera and Interview scenes.",
         obs.OBS_TEXT_INFO)
     obs.obs_properties_add_text(props, "guest_role", "Guest role", obs.OBS_TEXT_DEFAULT)
     obs.obs_properties_add_text(props, "_guest_role_hint",
-        "Two-Camera scene only.",
+        "Two-Camera and Interview scenes.",
+        obs.OBS_TEXT_INFO)
+    obs.obs_properties_add_text(props, "interviewer_name", "Interviewer name", obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_text(props, "interviewer_role", "Interviewer role", obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_text(props, "_interviewer_hint",
+        "Interview scenes only. The guest name and role above are used there too, and your host name labels the game.",
         obs.OBS_TEXT_INFO)
     obs.obs_properties_add_text(props, "topic",      "Topic",      obs.OBS_TEXT_DEFAULT)
     obs.obs_properties_add_text(props, "_topic_hint",
