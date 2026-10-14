@@ -114,8 +114,9 @@ local function get_scene_source(name)
     return obs.obs_get_source_by_name(name)
 end
 
-local function make_browser(name, url)
+local function make_browser(name, url, width, height)
     -- Return owned browser source ref, creating or updating URL as needed.
+    -- width/height default to the 1920x1080 main canvas.
     -- Caller must obs.obs_source_release() the result.
     local existing = obs.obs_get_source_by_name(name)
     if existing then
@@ -127,8 +128,8 @@ local function make_browser(name, url)
     end
     local d = obs.obs_data_create()
     obs.obs_data_set_string(d, "url",               url)
-    obs.obs_data_set_int   (d, "width",             1920)
-    obs.obs_data_set_int   (d, "height",            1080)
+    obs.obs_data_set_int   (d, "width",             width or 1920)
+    obs.obs_data_set_int   (d, "height",            height or 1080)
     obs.obs_data_set_bool  (d, "shutdown",          true)   -- pause when hidden
     obs.obs_data_set_bool  (d, "restart_when_active", true) -- re-run entrance anims
     obs.obs_data_set_int   (d, "fps",               30)
@@ -995,7 +996,194 @@ local function build_interview_scene(scene_name, layout, back, overlay, preroll,
     obs.obs_source_release(scene_src)
 end
 
-local function build_interview(base, interviewer, interviewer_role, guest, g_role, guest_credit, player, preroll_video, countdown_mins, socket_url, np_base)
+-- ── Vertical interview scenes (Aitum Vertical) ───────────────────────────────
+-- Aitum Vertical adds a second, 1080x1920 canvas to OBS (OBS 31.1 or later).
+-- These scenes go on it, reuse the same cams, game capture and preroll as
+-- the main interview scenes, and get their own 1080x1920 overlay
+-- (17-interview.html?canvas=vertical). Each main scene is linked to its
+-- vertical one, so switching the main scene switches the vertical too.
+
+local VERTICAL_CANVAS = "Aitum Vertical"
+
+-- Source rectangles {x, y, w, h} on the 1080x1920 canvas. They must match
+-- V_LAYOUTS in ivgo-ex's 17-interview.html, times 1.5 (V_SCALE).
+local VERTICAL_LAYOUTS = {
+    starting = {
+        preroll     = {18, 93, 1044, 588},
+    },
+    welcome = {
+        interviewer = {18, 93, 1044, 690},
+        player      = {18, 795, 1044, 690},
+    },
+    talk = {
+        interviewer = {18, 93, 1044, 690},
+        guest       = {18, 795, 1044, 690},
+        game        = {18, 1497, 720, 405},
+        player      = {486, 1755, 240, 135},
+    },
+    brb = {
+        preroll     = {18, 93, 1044, 588},
+    },
+}
+
+-- Main scene -> the vertical scene it switches to. Talk serves Game too.
+local VERTICAL_LINKS = {
+    {"IVGO · 17 Interview · Starting Soon", "IVGO · 17 Interview · Starting Soon (Vertical)", "starting"},
+    {"IVGO · 17 Interview · Welcome",       "IVGO · 17 Interview · Welcome (Vertical)",       "welcome"},
+    {"IVGO · 17 Interview · Talk",          "IVGO · 17 Interview · Talk (Vertical)",          "talk"},
+    {"IVGO · 17 Interview · Game",          "IVGO · 17 Interview · Talk (Vertical)",          "talk"},
+    {"IVGO · 17 Interview · Be Right Back", "IVGO · 17 Interview · Be Right Back (Vertical)", "brb"},
+}
+
+-- Scenes this script made on the vertical canvas. Aitum Vertical only
+-- takes in a canvas's scenes when the scene collection loads, so until
+-- OBS restarts nothing else holds them: keep a reference for the session.
+local vertical_scene_refs = {}
+
+local function get_vertical_scene(canvas, name)
+    -- Return the scene (borrowed) and an owned source ref, creating the
+    -- scene on the canvas if needed. Caller releases the source.
+    local src = obs.obs_canvas_get_source_by_name(canvas, name)
+    if src then return obs.obs_scene_from_source(src), src end
+    local scene = obs.obs_canvas_scene_create(canvas, name)
+    if not scene then return nil, nil end
+    table.insert(vertical_scene_refs, scene)
+    return scene, obs.obs_source_get_ref(obs.obs_scene_get_source(scene))
+end
+
+local function canvas_size(canvas)
+    local ok, w, h = pcall(function()
+        local ovi = obs.obs_video_info()
+        if obs.obs_canvas_get_video_info(canvas, ovi) then return ovi.base_width, ovi.base_height end
+    end)
+    if ok and w and h then return w, h end
+    return 1080, 1920
+end
+
+local function place_fill(scene, source, rect)
+    -- Like place(), but fill the box and crop the overflow, so a 16:9 cam
+    -- fills a taller frame instead of sitting in it letterboxed.
+    if not (source and rect) then return end
+    local item = place(scene, source, rect[1], rect[2], rect[3], rect[4])
+    if not item then return end
+    obs.obs_sceneitem_set_bounds_type(item, obs.OBS_BOUNDS_SCALE_OUTER)
+    if obs.obs_sceneitem_set_bounds_crop then obs.obs_sceneitem_set_bounds_crop(item, true) end
+end
+
+local function link_vertical_scene(main_name, vertical_name, width, height)
+    -- Aitum Vertical keeps each link on the main scene's settings, as a
+    -- "canvas" list of {width, height, scene}; it switches the vertical
+    -- canvas whose size matches when the main scene changes. Replace any
+    -- link for this canvas size and keep links for other canvases.
+    local src = obs.obs_get_source_by_name(main_name)
+    if not src then return end
+    local settings = obs.obs_source_get_settings(src)
+    local links = obs.obs_data_array_create()
+    local old = obs.obs_data_get_array(settings, "canvas")
+    if old then
+        for i = 0, obs.obs_data_array_count(old) - 1 do
+            local link = obs.obs_data_array_item(old, i)
+            if obs.obs_data_get_int(link, "width") ~= width or obs.obs_data_get_int(link, "height") ~= height then
+                obs.obs_data_array_push_back(links, link)
+            end
+            obs.obs_data_release(link)
+        end
+        obs.obs_data_array_release(old)
+    end
+    local link = obs.obs_data_create()
+    obs.obs_data_set_int(link, "width", width)
+    obs.obs_data_set_int(link, "height", height)
+    obs.obs_data_set_string(link, "scene", vertical_name)
+    obs.obs_data_array_push_back(links, link)
+    obs.obs_data_release(link)
+    obs.obs_data_set_array(settings, "canvas", links)
+    obs.obs_data_array_release(links)
+    obs.obs_data_release(settings)
+    obs.obs_source_release(src)
+end
+
+local function build_vertical_interview(base, params, preroll, socket_url)
+    if not obs.obs_get_canvas_by_name then
+        print("[IVGO] Vertical scenes need OBS 31.1 or later. Skipped.")
+        return
+    end
+    local canvas = obs.obs_get_canvas_by_name(VERTICAL_CANVAS)
+    if not canvas then
+        print("[IVGO] Vertical scenes need the Aitum Vertical plugin (aitum.tv/vertical). Skipped.")
+        return
+    end
+    local width, height = canvas_size(canvas)
+    if width ~= 1080 or height ~= 1920 then
+        print("[IVGO] Warning: the vertical canvas is " .. width .. "x" .. height ..
+              ". The vertical scenes are laid out for 1080x1920.")
+    end
+
+    local back = make_browser("IVGO: Interview Background (Vertical)",
+        base .. "/interview?layer=back&canvas=vertical", 1080, 1920)
+    local overlay = make_browser("IVGO: Interview Overlay (Vertical)",
+        append_socket_url(base .. "/interview?" .. params .. "&canvas=vertical", socket_url), 1080, 1920)
+    if not (back and overlay) then
+        print("[IVGO] Warning: could not create the vertical interview overlay sources")
+        obs.obs_canvas_release(canvas)
+        return
+    end
+    -- Same as the main overlay: keep running, read the live scene. Its
+    -- sounds are muted, as the main overlay already plays them.
+    configure_stateful_source(overlay)
+    local d = obs.obs_source_get_settings(overlay)
+    obs.obs_data_set_int(d, "webpage_control_level", 2)
+    obs.obs_data_set_bool(d, "reroute_audio", true)
+    obs.obs_source_update(overlay, d)
+    obs.obs_data_release(d)
+    obs.obs_source_set_muted(overlay, true)
+
+    local made = {}
+    for _, link in ipairs(VERTICAL_LINKS) do
+        local vertical_name, layout = link[2], link[3]
+        if not made[vertical_name] then
+            made[vertical_name] = true
+            local scene, scene_src = get_vertical_scene(canvas, vertical_name)
+            if scene then
+                local r = VERTICAL_LAYOUTS[layout]
+                place(scene, back, 0, 0, 1080, 1920)
+                place_fill(scene, preroll, r.preroll)
+                if r.game then
+                    local game = make_game_capture("IVGO: Game Capture")
+                    place_fill(scene, game, r.game)
+                    if game then obs.obs_source_release(game) end
+                end
+                if r.player then
+                    local cam = make_capture("IVGO: Host Camera", cam_type())
+                    place_fill(scene, cam, r.player)
+                    if cam then obs.obs_source_release(cam) end
+                end
+                if r.interviewer then
+                    local feed = make_remote_feed("IVGO: Interviewer")
+                    place_fill(scene, feed, r.interviewer)
+                    if feed then obs.obs_source_release(feed) end
+                end
+                if r.guest then
+                    local feed = make_remote_feed("IVGO: Interview Guest")
+                    place_fill(scene, feed, r.guest)
+                    if feed then obs.obs_source_release(feed) end
+                end
+                place(scene, overlay, 0, 0, 1080, 1920)
+                obs.obs_source_release(scene_src)
+            else
+                print("[IVGO] Warning: could not create '" .. vertical_name .. "' on the vertical canvas")
+            end
+        end
+        link_vertical_scene(link[1], vertical_name, width, height)
+    end
+
+    obs.obs_source_release(back)
+    obs.obs_source_release(overlay)
+    obs.obs_canvas_release(canvas)
+    print("[IVGO] Vertical interview scenes built and linked. If they don't show in " ..
+          "the Aitum Vertical dock yet, restart OBS.")
+end
+
+local function build_interview(base, interviewer, interviewer_role, guest, g_role, guest_credit, player, preroll_video, countdown_mins, socket_url, np_base, vertical)
     -- Five scenes, one overlay: starting soon, welcome, the interview (the
     -- conversation large), the interview with the game large, and be right
     -- back. The same overlay and background sources sit in all of them, so
@@ -1033,6 +1221,8 @@ local function build_interview(base, interviewer, interviewer_role, guest, g_rol
     build_interview_scene("IVGO · 17 Interview · Talk",          "talk",     back, overlay, preroll, base, socket_url, np_base)
     build_interview_scene("IVGO · 17 Interview · Game",          "game",     back, overlay, preroll, base, socket_url, np_base)
     build_interview_scene("IVGO · 17 Interview · Be Right Back", "brb",      back, overlay, preroll, base, socket_url, np_base)
+
+    if vertical then build_vertical_interview(base, params, preroll, socket_url) end
 
     if preroll then obs.obs_source_release(preroll) end
     obs.obs_source_release(back)
@@ -1225,7 +1415,10 @@ local function build_all()
     -- scene lists don't fill up with scenes they'll never use.
     local interviews = obs.obs_data_get_bool(settings_ref, "interview_scenes")
     if interviews then
-        build_interview(base, interviewer, interviewer_role, guest, g_role, guest_credit, host, preroll_video, countdown_mins, socket_url, np_base)
+        build_interview(base, interviewer, interviewer_role, guest, g_role, guest_credit, host, preroll_video, countdown_mins, socket_url, np_base,
+                        obs.obs_data_get_bool(settings_ref, "vertical_interview"))
+    elseif obs.obs_data_get_bool(settings_ref, "vertical_interview") then
+        print("[IVGO] Vertical interview scenes need Interview scenes ticked too. Skipped.")
     end
     build_ending(base, socket_url, np_base)
     build_arranging(base, arr_piece, arr_collection, arr_sprints_total, arr_focus_mins, arr_break_mins, socket_url, np_base)
@@ -1438,6 +1631,7 @@ function script_defaults(settings)
     obs.obs_data_set_default_string(settings, "guest_role", "ROLE")
     obs.obs_data_set_default_string(settings, "topic",      "WHY VIDEO GAME MUSIC DESERVES A FULL ORCHESTRA")
     obs.obs_data_set_default_bool  (settings, "interview_scenes", false)
+    obs.obs_data_set_default_bool  (settings, "vertical_interview", false)
     obs.obs_data_set_default_string(settings, "interviewer_name", "PHOEBE")
     obs.obs_data_set_default_string(settings, "interviewer_role", "HOST")
     obs.obs_data_set_default_string(settings, "guest_credit",     "")
@@ -1465,22 +1659,50 @@ function script_defaults(settings)
     obs.obs_data_set_default_int   (settings, "arr_break_mins",     5)
 end
 
+-- OBS lays each setting out as label | field, so the long labels here left
+-- the fields squeezed into a narrow column. These put the label on its
+-- own full-width line above the field instead, the way the hints below
+-- each field already show.
+local function label_above(props, name, text)
+    obs.obs_properties_add_text(props, "_" .. name .. "_label", "<b>" .. text .. "</b>", obs.OBS_TEXT_INFO)
+end
+
+local function add_text(props, name, text)
+    label_above(props, name, text)
+    return obs.obs_properties_add_text(props, name, "", obs.OBS_TEXT_DEFAULT)
+end
+
+local function add_int(props, name, text, min, max, step)
+    label_above(props, name, text)
+    return obs.obs_properties_add_int(props, name, "", min, max, step)
+end
+
+local function add_float(props, name, text, min, max, step)
+    label_above(props, name, text)
+    return obs.obs_properties_add_float(props, name, "", min, max, step)
+end
+
+local function add_list(props, name, text, type, format)
+    label_above(props, name, text)
+    return obs.obs_properties_add_list(props, name, "", type, format)
+end
+
 function script_properties()
     local props = obs.obs_properties_create()
 
-    obs.obs_properties_add_text(props, "host_name",  "Host name",  obs.OBS_TEXT_DEFAULT)
+    add_text(props, "host_name", "Host name")
     obs.obs_properties_add_text(props, "_host_name_hint",
         "Shown in the header bar and camera nameplate.",
         obs.OBS_TEXT_INFO)
-    obs.obs_properties_add_text(props, "host_role",  "Host role",  obs.OBS_TEXT_DEFAULT)
+    add_text(props, "host_role", "Host role")
     obs.obs_properties_add_text(props, "_host_role_hint",
         "Shown below your name.",
         obs.OBS_TEXT_INFO)
-    obs.obs_properties_add_text(props, "guest_name", "Guest name", obs.OBS_TEXT_DEFAULT)
+    add_text(props, "guest_name", "Guest name")
     obs.obs_properties_add_text(props, "_guest_name_hint",
         "Two-Camera and Interview scenes.",
         obs.OBS_TEXT_INFO)
-    obs.obs_properties_add_text(props, "guest_role", "Guest role", obs.OBS_TEXT_DEFAULT)
+    add_text(props, "guest_role", "Guest role")
     obs.obs_properties_add_text(props, "_guest_role_hint",
         "Two-Camera and Interview scenes.",
         obs.OBS_TEXT_INFO)
@@ -1488,33 +1710,37 @@ function script_properties()
     obs.obs_properties_add_text(props, "_interview_scenes_hint",
         "Only for interview shows: starting soon, welcome, talk, game and be right back, with remote feeds for the interviewer and guest. Leave unticked otherwise. Unticking doesn't delete scenes already made; remove those in OBS.",
         obs.OBS_TEXT_INFO)
-    obs.obs_properties_add_text(props, "interviewer_name", "Interviewer name", obs.OBS_TEXT_DEFAULT)
-    obs.obs_properties_add_text(props, "interviewer_role", "Interviewer role", obs.OBS_TEXT_DEFAULT)
+    obs.obs_properties_add_bool(props, "vertical_interview", "Vertical interview scenes (needs the Aitum Vertical plugin)")
+    obs.obs_properties_add_text(props, "_vertical_interview_hint",
+        "Also builds the interview scenes on Aitum Vertical's 1080x1920 canvas, and links each to its main scene so switching the main scene switches the vertical one. Talk is used for both Talk and Game. Needs OBS 31.1 or later and Interview scenes ticked. Restart OBS after the first build so Aitum lists the new scenes.",
+        obs.OBS_TEXT_INFO)
+    add_text(props, "interviewer_name", "Interviewer name")
+    add_text(props, "interviewer_role", "Interviewer role")
     obs.obs_properties_add_text(props, "_interviewer_hint",
         "Interview scenes only. The guest name and role above are used there too, and your host name labels the game.",
         obs.OBS_TEXT_INFO)
-    obs.obs_properties_add_text(props, "guest_credit", "Guest credit", obs.OBS_TEXT_DEFAULT)
+    add_text(props, "guest_credit", "Guest credit")
     obs.obs_properties_add_text(props, "_guest_credit_hint",
         "Under the guest's name on the interview's starting-soon and be-right-back scenes, e.g. Resident Evil / Leon S. Kennedy.",
         obs.OBS_TEXT_INFO)
-    obs.obs_properties_add_text(props, "preroll_video", "Interview preroll video", obs.OBS_TEXT_DEFAULT)
+    add_text(props, "preroll_video", "Interview preroll video")
     obs.obs_properties_add_text(props, "_preroll_hint",
         "A YouTube link, or the full path of a video file. Plays on the interview's starting-soon and be-right-back scenes.",
         obs.OBS_TEXT_INFO)
-    obs.obs_properties_add_text(props, "topic",      "Topic",      obs.OBS_TEXT_DEFAULT)
+    add_text(props, "topic", "Topic")
     obs.obs_properties_add_text(props, "_topic_hint",
         "Shown in the topic strip of the Two-Camera scene.",
         obs.OBS_TEXT_INFO)
-    obs.obs_properties_add_int (props, "countdown_mins", "Countdown (mins)", 0, 120, 1)
+    add_int(props, "countdown_mins", "Countdown (mins)", 0, 120, 1)
     obs.obs_properties_add_text(props, "_countdown_hint",
         "Minutes the 01 Starting Soon countdown starts at when the scene loads. 0 to hide. Can also be overridden per-source via ?mins=<n> on the browser-source URL.",
         obs.OBS_TEXT_INFO)
-    obs.obs_properties_add_text(props, "socket_url", "Socket URL", obs.OBS_TEXT_DEFAULT)
+    add_text(props, "socket_url", "Socket URL")
     obs.obs_properties_add_text(props, "_socket_hint",
         "Local: ws://localhost:4000/overlay   Live: wss://ivgorchestra.fly.dev/overlay",
         obs.OBS_TEXT_INFO)
 
-    obs.obs_properties_add_text(props, "now_playing_http_base", "Now-Playing HTTP base", obs.OBS_TEXT_DEFAULT)
+    add_text(props, "now_playing_http_base", "Now-Playing HTTP base")
     obs.obs_properties_add_text(props, "_now_playing_hint",
         "URL of the SMTC watch script's HTTP server. Default http://localhost:7779 — leave blank to skip the now-playing overlay entirely.",
         obs.OBS_TEXT_INFO)
@@ -1525,7 +1751,7 @@ function script_properties()
     obs.obs_properties_add_button(props, "btn_start_np", "Start Now Playing watcher now",
         function(_, _) start_now_playing_watcher(); return true end)
 
-    obs.obs_properties_add_text(props, "twitch_channel", "Twitch channel", obs.OBS_TEXT_DEFAULT)
+    add_text(props, "twitch_channel", "Twitch channel")
     obs.obs_properties_add_text(props, "_twitch_channel_hint",
         "Channel login the clip player reads chat from — and the only channel whose clips play from viewer links.",
         obs.OBS_TEXT_INFO)
@@ -1533,7 +1759,7 @@ function script_properties()
     obs.obs_properties_add_text(props, "_clip_player_hint",
         "Plays a panel when anyone posts a link to one of this channel's clips, or when a mod types !so <user> (shows that streamer's featured clip). Raid alerts interrupt it. Uncheck and rebuild scenes to remove the source.",
         obs.OBS_TEXT_INFO)
-    local clip_size = obs.obs_properties_add_list(props, "clip_size", "Clip player size",
+    local clip_size = add_list(props, "clip_size", "Clip player size",
         obs.OBS_COMBO_TYPE_LIST, obs.OBS_COMBO_FORMAT_STRING)
     obs.obs_property_list_add_string(clip_size, "Large — 1280x720, centered",     "large")
     obs.obs_property_list_add_string(clip_size, "Small — 960x540, top-left",      "small")
@@ -1545,7 +1771,7 @@ function script_properties()
     obs.obs_properties_add_text(props, "_weeman_hint",
         "Viewers type !weeman to send a WeeMan walking along the bottom of the stream, tinted with their chat colour and captioned with their name. One each, at most 20 at once. Mods clear them with !weemanclear.",
         obs.OBS_TEXT_INFO)
-    obs.obs_properties_add_int(props, "weeman_mins", "WeeMan: minutes on screen", 1, 120, 1)
+    add_int(props, "weeman_mins", "WeeMan: minutes on screen", 1, 120, 1)
     obs.obs_properties_add_bool(props, "weeman_bubbles", "WeeMan: show chat speech bubbles")
 
     obs.obs_properties_add_bool(props, "redact_overlay", "Redaction overlay (chat !redact / !declassify)")
@@ -1557,15 +1783,15 @@ function script_properties()
     obs.obs_properties_add_text(props, "_resonance_hint",
         "!resonance (300 Ostis, 5min cooldown) runs a 45s window: ducks/boosts real OBS input volumes (read and restored exactly, your mix is never clobbered) and shows a red HUD. Needs the source names below to actually touch OBS audio - blank means the HUD still shows but nothing gets ducked.",
         obs.OBS_TEXT_INFO)
-    obs.obs_properties_add_text(props, "resonance_music_source", "Resonance: music source name", obs.OBS_TEXT_DEFAULT)
-    obs.obs_properties_add_text(props, "resonance_duck_sources", "Resonance: duck source names (comma-separated)", obs.OBS_TEXT_DEFAULT)
+    add_text(props, "resonance_music_source", "Resonance: music source name")
+    add_text(props, "resonance_duck_sources", "Resonance: duck source names (comma-separated)")
     obs.obs_properties_add_text(props, "_resonance_sources_hint",
         "Exact OBS input names, e.g. music source \"Music\", duck sources \"Mic/Aux, Game\". Case-sensitive.",
         obs.OBS_TEXT_INFO)
-    obs.obs_properties_add_float(props, "resonance_boost_db", "Resonance: music boost (dB)", -60, 30, 1)
-    obs.obs_properties_add_float(props, "resonance_duck_db", "Resonance: duck amount (dB)", -60, 30, 1)
-    obs.obs_properties_add_text(props, "resonance_filter_source", "Resonance: visual filter source (optional)", obs.OBS_TEXT_DEFAULT)
-    obs.obs_properties_add_text(props, "resonance_filter_name", "Resonance: visual filter name (optional)", obs.OBS_TEXT_DEFAULT)
+    add_float(props, "resonance_boost_db", "Resonance: music boost (dB)", -60, 30, 1)
+    add_float(props, "resonance_duck_db", "Resonance: duck amount (dB)", -60, 30, 1)
+    add_text(props, "resonance_filter_source", "Resonance: visual filter source (optional)")
+    add_text(props, "resonance_filter_name", "Resonance: visual filter name (optional)")
     obs.obs_properties_add_text(props, "_resonance_filter_hint",
         "Optional: the name of a filter you've already added to the filter source (e.g. a Color Correction filter on your Game source, left disabled by default) - Resonance Mode enables it for the 45s window and disables it again after. Leave both blank to skip.",
         obs.OBS_TEXT_INFO)
@@ -1579,11 +1805,11 @@ function script_properties()
         "While a viewer's WeeMan is out, what they say in chat appears in a speech bubble above it. This puts viewer text on your stream, so untick it if you would rather only show names.",
         obs.OBS_TEXT_INFO)
 
-    obs.obs_properties_add_text(props, "arr_piece",         "Arranging: Piece (boot default only — change with !piece in chat)",      obs.OBS_TEXT_DEFAULT)
-    obs.obs_properties_add_text(props, "arr_collection",    "Arranging: Game (boot default only — change with !from in chat)",       obs.OBS_TEXT_DEFAULT)
-    obs.obs_properties_add_int (props, "arr_sprints_total", "Arranging: total sprints", 1, 12, 1)
-    obs.obs_properties_add_int (props, "arr_focus_mins",    "Arranging: focus mins",    1, 90, 1)
-    obs.obs_properties_add_int (props, "arr_break_mins",    "Arranging: break mins",    1, 60, 1)
+    add_text(props, "arr_piece", "Arranging: Piece (boot default only — change with !piece in chat)")
+    add_text(props, "arr_collection", "Arranging: Game (boot default only — change with !from in chat)")
+    add_int(props, "arr_sprints_total", "Arranging: total sprints", 1, 12, 1)
+    add_int(props, "arr_focus_mins", "Arranging: focus mins",    1, 90, 1)
+    add_int(props, "arr_break_mins", "Arranging: break mins",    1, 60, 1)
     obs.obs_properties_add_text(props, "_arr_hint",
         "Boot-time defaults for the 07 Arranging scene. Once Phoenix is connected, chat commands (!task, !done, !info, !piece, !from, !pomo) and the LiveView control panel take over.",
         obs.OBS_TEXT_INFO)
