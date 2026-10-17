@@ -748,6 +748,11 @@ local function build_game(base, socket_url, np_base)
 
     local overlay = make_browser("IVGO: Game Overlay",  append_socket_url(base .. "/game?mic=1", socket_url))
     if overlay then
+        -- This page plays the alert sounds. Its own fader (reroute_audio),
+        -- reset to -12 dBFS on every build, the same as the game capture:
+        -- the alert clips peak near 0 dB and drown the game at full volume.
+        configure_audio_source(overlay)
+        obs.obs_source_set_volume(overlay, 10 ^ (-12 / 20))
         place(scene, overlay, 0, 0, 1920, 1080)
         obs.obs_source_release(overlay)
     end
@@ -1274,7 +1279,20 @@ local function build_vertical_main(base, host, host_role, countdown_mins, socket
     scene_for("IVGO · 02 Game", function(scene)
         add(scene, make_game_capture("IVGO: Game Capture"), VERTICAL_MAIN.game.game, true)
         add(scene, make_capture("IVGO: Host Camera", cam_type()), VERTICAL_MAIN.game.cam, true)
-        add(scene, make_vertical_overlay("IVGO: Game Overlay (Vertical)", url("/game")), full)
+        local overlay = make_vertical_overlay("IVGO: Game Overlay (Vertical)", url("/game"))
+        if overlay then
+            -- A fader at -12 dBFS like the main Game Overlay, but not
+            -- monitored. The page itself plays nothing (canvas=vertical):
+            -- OBS mixes audio once for both canvases, so the main Game
+            -- Overlay's alerts already reach the vertical stream.
+            local d = obs.obs_source_get_settings(overlay)
+            obs.obs_data_set_bool(d, "reroute_audio", true)
+            obs.obs_source_update(overlay, d)
+            obs.obs_data_release(d)
+            obs.obs_source_set_monitoring_type(overlay, obs.OBS_MONITORING_TYPE_NONE)
+            obs.obs_source_set_volume(overlay, 10 ^ (-12 / 20))
+        end
+        add(scene, overlay, full)
     end)
 
     scene_for("IVGO · 03 Camera", function(scene)
