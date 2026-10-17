@@ -192,10 +192,9 @@ local function make_game_capture(name)
     -- Volume is reset to -12 dBFS on every refresh — game audio at 0 dB clips
     -- against voice; -12 dB leaves headroom for chat toasts and the host mic.
     -- (display_capture on macOS ignores capture_audio; harmless to set.)
-    -- MONITOR_AND_OUTPUT so game audio also reaches your own monitoring
-    -- device, same reasoning as configure_audio_source below - this is a
-    -- native capture source, not a browser one, so it needs the monitoring
-    -- type set directly rather than that helper's reroute_audio step.
+    -- Output only, not monitored: you already hear the game from the PC,
+    -- so monitoring it too plays it twice. Set on existing sources as well,
+    -- to undo the old Monitor and Output setting.
     local kind = game_type()
     local mul = 10 ^ (-12 / 20)   -- -12 dBFS as linear multiplier (~0.2512)
     local existing = obs.obs_get_source_by_name(name)
@@ -205,7 +204,7 @@ local function make_game_capture(name)
         obs.obs_source_update(existing, d)
         obs.obs_data_release(d)
         obs.obs_source_set_volume(existing, mul)
-        obs.obs_source_set_monitoring_type(existing, obs.OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT)
+        obs.obs_source_set_monitoring_type(existing, obs.OBS_MONITORING_TYPE_NONE)
         return existing
     end
     local d = obs.obs_data_create()
@@ -214,7 +213,7 @@ local function make_game_capture(name)
     obs.obs_data_release(d)
     if src then
         obs.obs_source_set_volume(src, mul)
-        obs.obs_source_set_monitoring_type(src, obs.OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT)
+        obs.obs_source_set_monitoring_type(src, obs.OBS_MONITORING_TYPE_NONE)
     end
     return src
 end
