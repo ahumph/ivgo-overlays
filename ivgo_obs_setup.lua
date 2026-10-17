@@ -1102,21 +1102,46 @@ local function link_vertical_scene(main_name, vertical_name, width, height)
     obs.obs_source_release(src)
 end
 
-local function build_vertical_interview(base, params, preroll, socket_url)
+local function open_vertical_canvas()
+    -- Return Aitum Vertical's canvas (owned; caller releases it) and its
+    -- size, or nil when OBS or the plugin can't give us one.
     if not obs.obs_get_canvas_by_name then
         print("[IVGO] Vertical scenes need OBS 31.1 or later. Skipped.")
-        return
+        return nil
     end
     local canvas = obs.obs_get_canvas_by_name(VERTICAL_CANVAS)
     if not canvas then
         print("[IVGO] Vertical scenes need the Aitum Vertical plugin (aitum.tv/vertical). Skipped.")
-        return
+        return nil
     end
     local width, height = canvas_size(canvas)
     if width ~= 1080 or height ~= 1920 then
         print("[IVGO] Warning: the vertical canvas is " .. width .. "x" .. height ..
               ". The vertical scenes are laid out for 1080x1920.")
     end
+    return canvas, width, height
+end
+
+local function no_mixer_channel(src)
+    -- A vertical page (?canvas=vertical) plays no sound, since the main
+    -- canvas's page already plays each alert. Keep it out of OBS's mixer,
+    -- so there's no second fader to unmute by mistake.
+    local d = obs.obs_source_get_settings(src)
+    obs.obs_data_set_bool(d, "reroute_audio", false)
+    obs.obs_source_update(src, d)
+    obs.obs_data_release(d)
+end
+
+local function make_vertical_overlay(name, url)
+    -- A 1080x1920 browser source for a vertical scene, with no fader.
+    local src = make_browser(name, url, 1080, 1920)
+    if src then no_mixer_channel(src) end
+    return src
+end
+
+local function build_vertical_interview(base, params, preroll, socket_url)
+    local canvas, width, height = open_vertical_canvas()
+    if not canvas then return end
 
     local back = make_browser("IVGO: Interview Background (Vertical)",
         base .. "/interview?layer=back&canvas=vertical", 1080, 1920)
@@ -1127,15 +1152,14 @@ local function build_vertical_interview(base, params, preroll, socket_url)
         obs.obs_canvas_release(canvas)
         return
     end
-    -- Same as the main overlay: keep running, read the live scene. Its
-    -- sounds are muted, as the main overlay already plays them.
+    -- Same as the main overlay: keep running, read the live scene. It
+    -- plays no sound and has no fader (no_mixer_channel).
     configure_stateful_source(overlay)
     local d = obs.obs_source_get_settings(overlay)
     obs.obs_data_set_int(d, "webpage_control_level", 2)
-    obs.obs_data_set_bool(d, "reroute_audio", true)
     obs.obs_source_update(overlay, d)
     obs.obs_data_release(d)
-    obs.obs_source_set_muted(overlay, true)
+    no_mixer_channel(overlay)
 
     local made = {}
     for _, link in ipairs(VERTICAL_LINKS) do
@@ -1180,6 +1204,85 @@ local function build_vertical_interview(base, params, preroll, socket_url)
     obs.obs_source_release(overlay)
     obs.obs_canvas_release(canvas)
     print("[IVGO] Vertical interview scenes built and linked. If they don't show in " ..
+          "the Aitum Vertical dock yet, restart OBS.")
+end
+
+-- ── Vertical main scenes (Aitum Vertical) ────────────────────────────────────
+-- 01 Starting Soon, 02 Game, 03 Camera, 04 Be Right Back and 06 Ending on
+-- the vertical canvas, each with its page's ?canvas=vertical overlay and
+-- linked to its main scene. The same cam, game capture and background
+-- videos are reused. The alert, !info and now playing sources stay on the
+-- main canvas only.
+
+-- Source rectangles {x, y, w, h} on the 1080x1920 canvas. They must match
+-- V_GAME and V_CAM in ivgo-ex's 02-game.html and 03-camera.html, times 1.5.
+-- The vertical game fills a box taller than 16:9, cropped to its centre.
+local VERTICAL_MAIN = {
+    game   = { cam = {0, 81, 1080, 795}, game = {0, 879, 1080, 987} },
+    camera = { cam = {18, 93, 1044, 1320} },
+}
+
+local function build_vertical_main(base, host, host_role, countdown_mins, socket_url)
+    local canvas, width, height = open_vertical_canvas()
+    if not canvas then return end
+
+    -- No egg or raid video: they're sized for 1920x1080.
+    local function url(path, extra)
+        return append_socket_url(base .. path .. "?canvas=vertical&egg_off=1&raid_bg_off=1" .. (extra or ""), socket_url)
+    end
+
+    local function scene_for(main_name, build)
+        local vertical_name = main_name .. " (Vertical)"
+        local scene, scene_src = get_vertical_scene(canvas, vertical_name)
+        if not scene then
+            print("[IVGO] Warning: could not create '" .. vertical_name .. "' on the vertical canvas")
+            return
+        end
+        build(scene)
+        obs.obs_source_release(scene_src)
+        link_vertical_scene(main_name, vertical_name, width, height)
+    end
+
+    local function add(scene, source, rect, fill)
+        if not source then return end
+        if fill then place_fill(scene, source, rect) else place(scene, source, rect[1], rect[2], rect[3], rect[4]) end
+        obs.obs_source_release(source)
+    end
+
+    local full = {0, 0, 1080, 1920}
+
+    local countdown = ""
+    if countdown_mins and countdown_mins > 0 then
+        countdown = "&mins=" .. tostring(countdown_mins) .. "&secs=0"
+    end
+    scene_for("IVGO · 01 Starting Soon", function(scene)
+        add(scene, make_media("IVGO: Starting Soon Video", repo_dir() .. "/media/buts.mkv"), full, true)
+        add(scene, make_vertical_overlay("IVGO: Starting Soon (Vertical)", url("/starting-soon", countdown)), full)
+    end)
+
+    scene_for("IVGO · 02 Game", function(scene)
+        add(scene, make_game_capture("IVGO: Game Capture"), VERTICAL_MAIN.game.game, true)
+        add(scene, make_capture("IVGO: Host Camera", cam_type()), VERTICAL_MAIN.game.cam, true)
+        add(scene, make_vertical_overlay("IVGO: Game Overlay (Vertical)", url("/game")), full)
+    end)
+
+    scene_for("IVGO · 03 Camera", function(scene)
+        add(scene, make_capture("IVGO: Host Camera", cam_type()), VERTICAL_MAIN.camera.cam, true)
+        add(scene, make_vertical_overlay("IVGO: Camera Overlay (Vertical)",
+            url("/camera", "&host=" .. urlencode(host) .. "&hostRole=" .. urlencode(host_role))), full)
+    end)
+
+    scene_for("IVGO · 04 Be Right Back", function(scene)
+        add(scene, make_vertical_overlay("IVGO: BRB (Vertical)", url("/brb")), full)
+    end)
+
+    scene_for("IVGO · 06 Ending", function(scene)
+        add(scene, make_media("IVGO: Ending Video", repo_dir() .. "/media/tetris.webm"), full, true)
+        add(scene, make_vertical_overlay("IVGO: Ending (Vertical)", url("/ending")), full)
+    end)
+
+    obs.obs_canvas_release(canvas)
+    print("[IVGO] Vertical scenes built and linked. If they don't show in " ..
           "the Aitum Vertical dock yet, restart OBS.")
 end
 
@@ -1421,6 +1524,10 @@ local function build_all()
         print("[IVGO] Vertical interview scenes need Interview scenes ticked too. Skipped.")
     end
     build_ending(base, socket_url, np_base)
+    -- After build_ending, so every main scene exists to link to.
+    if obs.obs_data_get_bool(settings_ref, "vertical_scenes") then
+        build_vertical_main(base, host, host_role, countdown_mins, socket_url)
+    end
     build_arranging(base, arr_piece, arr_collection, arr_sprints_total, arr_focus_mins, arr_break_mins, socket_url, np_base)
 
     print("[IVGO] Done — " .. (interviews and 12 or 7) .. " scenes created / refreshed.")
@@ -1632,6 +1739,7 @@ function script_defaults(settings)
     obs.obs_data_set_default_string(settings, "topic",      "WHY VIDEO GAME MUSIC DESERVES A FULL ORCHESTRA")
     obs.obs_data_set_default_bool  (settings, "interview_scenes", false)
     obs.obs_data_set_default_bool  (settings, "vertical_interview", false)
+    obs.obs_data_set_default_bool  (settings, "vertical_scenes", false)
     obs.obs_data_set_default_string(settings, "interviewer_name", "PHOEBE")
     obs.obs_data_set_default_string(settings, "interviewer_role", "HOST")
     obs.obs_data_set_default_string(settings, "guest_credit",     "")
@@ -1705,6 +1813,10 @@ function script_properties()
     add_text(props, "guest_role", "Guest role")
     obs.obs_properties_add_text(props, "_guest_role_hint",
         "Two-Camera and Interview scenes.",
+        obs.OBS_TEXT_INFO)
+    obs.obs_properties_add_bool(props, "vertical_scenes", "Vertical scenes (needs the Aitum Vertical plugin)")
+    obs.obs_properties_add_text(props, "_vertical_scenes_hint",
+        "Also builds Starting Soon, Game, Camera, Be Right Back and Ending on Aitum Vertical's 1080x1920 canvas, and links each to its main scene so switching the main scene switches the vertical one. Needs OBS 31.1 or later. Restart OBS after the first build so Aitum lists the new scenes.",
         obs.OBS_TEXT_INFO)
     obs.obs_properties_add_bool(props, "interview_scenes", "Interview scenes (IVGO · 17 Interview ...)")
     obs.obs_properties_add_text(props, "_interview_scenes_hint",
