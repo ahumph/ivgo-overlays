@@ -1,8 +1,9 @@
 -- ivgo_obs_setup.lua — IVGO Overlay Installer for OBS
 --
 -- Install: OBS menu → Tools → Scripts → "+" → select this file.
--- Fill in the fields in the Scripts panel, then click "Create / Refresh Scenes".
+-- Fill in the fields in the Scripts panel, then click "Build scenes".
 -- Re-run any time to update details (new guest name, new countdown, etc.).
+-- "Update & build scenes" pulls the latest version and builds with it.
 --
 -- After the first run, open each compositing scene (Game, Camera, Two-Cam) and
 -- right-click the placeholder capture sources to point them at your game window
@@ -509,7 +510,7 @@ end
 -- fresh page load on each rebuild: OBS only reloads a browser source when its
 -- URL changes, and these deliberately have restart_when_active off, so an HTML
 -- edit with no URL change would otherwise keep serving the cached old page and
--- "Create / Refresh Scenes" would appear to do nothing.
+-- "Build scenes" would appear to do nothing.
 local function configure_stateful_source(src)
     local d = obs.obs_source_get_settings(src)
     obs.obs_data_set_bool(d, "shutdown",            false)
@@ -1557,8 +1558,9 @@ end
 
 function script_description()
     return [[<b>IVGO Overlay Installer</b><br><br>
-Builds all seven IVGO scenes in OBS. Fill in the fields below then click
-<b>Create / Refresh Scenes</b>.<br><br>
+Builds all the IVGO scenes in OBS. Fill in the fields below, then click
+<b>Build scenes</b> at the top. <b>Update &amp; build scenes</b> pulls the
+latest version first and builds with it.<br><br>
 Safe to re-run: updates existing scenes rather than duplicating them.<br><br>
 After the first run, right-click the placeholder capture sources in the
 Game, Camera, Two-Cam, and Arranging scenes to point them at your webcam,
@@ -1690,6 +1692,47 @@ local function stop_clip_now()
     print("[IVGO] Stop clip: Clip Player reloaded.")
 end
 
+-- ── Update in one click ─────────────────────────────────────────────────────
+-- OBS keeps running the script it loaded, so new code from a pull would
+-- normally need a manual reload. ivgo_update instead loads the pulled file
+-- into this same script, which replaces these globals and the script_*
+-- hooks with the new version's, hands it the settings and hotkey, and lets
+-- the new code build the scenes. New settings fields only show in the
+-- panel after reopening Tools > Scripts.
+
+function ivgo_build()
+    build_all()
+end
+
+-- Called on the newly loaded code by the old version's ivgo_update.
+function ivgo_adopt(settings, hotkey_id)
+    settings_ref = settings
+    stop_clip_hotkey_id = hotkey_id
+    script_defaults(settings)
+end
+
+function ivgo_update()
+    local ok, changed = pull_latest()
+    if not ok then return end
+    if not changed then
+        print("[IVGO] Already up to date.")
+        build_all()
+        return
+    end
+
+    local chunk, err = loadfile(script_path() .. "ivgo_obs_setup.lua")
+    local loaded = chunk and pcall(chunk)
+    if not loaded then
+        print("[IVGO] Pulled a new version but could not load it (" .. tostring(err) ..
+              "). Reload this script in Tools > Scripts, then click Build scenes.")
+        return
+    end
+    print("[IVGO] Loaded the new version.")
+    -- These names now point at the new code's functions.
+    ivgo_adopt(settings_ref, stop_clip_hotkey_id)
+    ivgo_build()
+end
+
 function script_load(settings)
     settings_ref = settings
     ensure_obs_websocket_enabled()
@@ -1772,6 +1815,17 @@ end
 
 function script_properties()
     local props = obs.obs_properties_create()
+
+    -- Buttons first, so they're at the top of the Scripts panel. They call
+    -- the globals below rather than local functions, so after an update
+    -- hot-loads new code they run the new version.
+    obs.obs_properties_add_button(props, "btn_update", "Update & build scenes",
+        function(_, _) ivgo_update(); return true end)
+    obs.obs_properties_add_text(props, "_update_hint",
+        "Pulls the latest version, loads it and builds the scenes, all in one go. Use Build scenes to rebuild without checking for an update.",
+        obs.OBS_TEXT_INFO)
+    obs.obs_properties_add_button(props, "btn", "Build scenes",
+        function(_, _) ivgo_build(); return true end)
 
     add_text(props, "host_name", "Host name")
     obs.obs_properties_add_text(props, "_host_name_hint",
@@ -1878,23 +1932,6 @@ function script_properties()
     obs.obs_properties_add_text(props, "_arr_hint",
         "Boot-time defaults for the 07 Arranging scene. Once Phoenix is connected, chat commands (!task, !done, !info, !piece, !from, !pomo) and the LiveView control panel take over.",
         obs.OBS_TEXT_INFO)
-
-    obs.obs_properties_add_button(props, "btn", "Create / Refresh Scenes",
-        function(_, _) build_all(); return true end)
-
-    obs.obs_properties_add_button(props, "btn_pull", "Pull latest & refresh",
-        function(_, _)
-            local ok, changed = pull_latest()
-            if ok and changed then
-                -- The new script isn't loaded yet; building now would use the
-                -- old one and miss anything new (scenes, settings).
-                print("[IVGO] Updated. Reload this script (Tools > Scripts, the reload button) " ..
-                      "to use the new version, then click Create / Refresh Scenes.")
-            elseif ok then
-                build_all()
-            end
-            return true
-        end)
 
     return props
 end

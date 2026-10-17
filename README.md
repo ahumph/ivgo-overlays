@@ -84,7 +84,7 @@ These appear on the right when the script is selected. All have sensible default
 
 ### Refreshing the scenes after changing settings
 
-After editing any field above, click **Create / Refresh Scenes** at the bottom of the script panel. The script is **idempotent** — re-running it updates existing scenes instead of duplicating them. You can run it as many times as you like; nothing gets clobbered except the bits you explicitly changed.
+After editing any field above, click **Build scenes** at the top of the script panel (or **Update & build scenes** to pull the latest version first). The script is **idempotent** — re-running it updates existing scenes instead of duplicating them. You can run it as many times as you like; nothing gets clobbered except the bits you explicitly changed.
 
 ---
 
@@ -474,10 +474,10 @@ The crop values in the installer (`top=825, bottom=2, left=35, right=41`) assume
 You're using `fire.webm` instead of `fire-alpha.webm`. The alpha-channel version is what the overlay loads by default — confirm `scenes/10-fire.html` references `fire-alpha.webm`.
 
 **Changed `11-clip.html` but the Clip Player still behaves like the old version.**
-The source is serving a cached page. OBS only reloads a browser source when its **URL** changes, and this one deliberately has *refresh on scene activation* off (it's stateful), so an HTML edit that doesn't also change a URL param won't be picked up. Clicking **Create / Refresh Scenes** now forces a no-cache reload of this source, so that's the fix — or right-click `IVGO: Clip Player` → **Refresh cache of current page**.
+The source is serving a cached page. OBS only reloads a browser source when its **URL** changes, and this one deliberately has *refresh on scene activation* off (it's stateful), so an HTML edit that doesn't also change a URL param won't be picked up. Clicking **Build scenes** now forces a no-cache reload of this source, so that's the fix — or right-click `IVGO: Clip Player` → **Refresh cache of current page**.
 
 **Clip plays but you can't hear it (or viewers can't).**
-The installer sets this up, so this should only bite a source created before the audio wiring existed — click **Create / Refresh Scenes** to re-apply it. To check by hand: right-click `IVGO: Clip Player` → **Properties** → tick **Control audio via OBS**, then right-click it in the **Audio Mixer** → **Advanced Audio Properties** → set **Audio Monitoring** to *Monitor and Output*. Without the first, browser audio bypasses the mixer entirely and only reaches the stream if you happen to capture desktop audio; without the second, you won't hear it in your own headphones.
+The installer sets this up, so this should only bite a source created before the audio wiring existed — click **Build scenes** to re-apply it. To check by hand: right-click `IVGO: Clip Player` → **Properties** → tick **Control audio via OBS**, then right-click it in the **Audio Mixer** → **Advanced Audio Properties** → set **Audio Monitoring** to *Monitor and Output*. Without the first, browser audio bypasses the mixer entirely and only reaches the stream if you happen to capture desktop audio; without the second, you won't hear it in your own headphones.
 
 **Mic mute icon never appears (or never disappears).**
 Check obs-websocket is enabled: OBS → **Tools** → **WebSocket Server Settings** → Server Enabled, port 4455. If you've set a password, append `?obsws_pw=yourpassword` to the overlay browser-source URL. If your mic input isn't called *Mic/Aux*, override with `?mic_input=Your Input Name`. Disable per-source with `?mic_off=1`.
