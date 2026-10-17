@@ -236,6 +236,17 @@ local function configure_audio_source(src)
     obs.obs_source_set_monitoring_type(src, obs.OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT)
 end
 
+-- A scene's main overlay plays the alert sounds. Give it a fader in
+-- OBS's mixer (monitored, like configure_audio_source), reset to -12 dBFS
+-- on every build, the same as the game capture: the alert clips peak near
+-- 0 dB and drown the game at full volume. Without this its sound skips
+-- OBS and goes straight to the desktop speakers, never reaching the
+-- stream. In the mixer it's only heard while its scene is live.
+local function configure_alert_overlay(src)
+    configure_audio_source(src)
+    obs.obs_source_set_volume(src, 10 ^ (-12 / 20))
+end
+
 -- For pages that play no sound (sound=0 or canvas=vertical in the URL):
 -- the scene's main overlay plays each alert. Keep them out of OBS's audio
 -- altogether, with no fader and no monitoring, so there's nothing to turn
@@ -709,6 +720,7 @@ local function build_starting_soon(base, countdown_mins, socket_url, np_base)
 
     local src = make_browser("IVGO: Starting Soon", url)
     if src then
+        configure_alert_overlay(src)
         place(scene, src, 0, 0, 1920, 1080)
         obs.obs_source_release(src)
     end
@@ -748,11 +760,7 @@ local function build_game(base, socket_url, np_base)
 
     local overlay = make_browser("IVGO: Game Overlay",  append_socket_url(base .. "/game?mic=1", socket_url))
     if overlay then
-        -- This page plays the alert sounds. Its own fader (reroute_audio),
-        -- reset to -12 dBFS on every build, the same as the game capture:
-        -- the alert clips peak near 0 dB and drown the game at full volume.
-        configure_audio_source(overlay)
-        obs.obs_source_set_volume(overlay, 10 ^ (-12 / 20))
+        configure_alert_overlay(overlay)
         place(scene, overlay, 0, 0, 1920, 1080)
         obs.obs_source_release(overlay)
     end
@@ -800,6 +808,7 @@ local function build_camera(base, host, host_role, socket_url, np_base)
     local cam_params = "host=" .. urlencode(host) .. "&hostRole=" .. urlencode(host_role) .. "&mic=1"
     local overlay = make_browser("IVGO: Camera Overlay", append_socket_url(base .. "/camera?" .. cam_params, socket_url))
     if overlay then
+        configure_alert_overlay(overlay)
         place(scene, overlay, 0, 0, 1920, 1080)
         obs.obs_source_release(overlay)
     end
@@ -878,6 +887,7 @@ local function build_two_cam(base, host, host_role, guest, g_role, topic, socket
                    "&mic=1"
     local overlay = make_browser("IVGO: Two-Cam Overlay", append_socket_url(base .. "/two-camera?" .. params, socket_url))
     if overlay then
+        configure_alert_overlay(overlay)
         place(scene, overlay, 0, 0, 1920, 1080)
         obs.obs_source_release(overlay)
     end
@@ -1345,6 +1355,9 @@ local function build_interview(base, interviewer, interviewer_role, guest, g_rol
     obs.obs_data_set_int(d, "webpage_control_level", 2)
     obs.obs_source_update(overlay, d)
     obs.obs_data_release(d)
+    -- It keeps running when an interview scene isn't live, so outside the
+    -- mixer its alert sounds would play on the desktop speakers all stream.
+    configure_alert_overlay(overlay)
 
     local preroll = make_preroll(preroll_video)
 
@@ -1375,6 +1388,7 @@ local function build_ending(base, socket_url, np_base)
 
     local src = make_browser("IVGO: Ending", append_socket_url(base .. "/ending?mic=1", socket_url))
     if src then
+        configure_alert_overlay(src)
         place(scene, src, 0, 0, 1920, 1080)
         obs.obs_source_release(src)
     end
@@ -1487,6 +1501,7 @@ local function build_arranging(base, piece, collection, sprints_total, focus_min
 
     local overlay = make_browser("IVGO: Arranging Overlay", append_socket_url(base .. "/arranging?" .. params, socket_url))
     if overlay then
+        configure_alert_overlay(overlay)
         place(scene, overlay, 0, 0, 1920, 1080)
         obs.obs_source_release(overlay)
     end
