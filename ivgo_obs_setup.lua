@@ -236,6 +236,25 @@ local function configure_audio_source(src)
     obs.obs_source_set_monitoring_type(src, obs.OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT)
 end
 
+-- For pages that play no sound (sound=0 or canvas=vertical in the URL):
+-- the scene's main overlay plays each alert. Keep them out of OBS's audio
+-- altogether, with no fader and no monitoring, so there's nothing to turn
+-- on by mistake.
+local function no_mixer_channel(src)
+    local d = obs.obs_source_get_settings(src)
+    obs.obs_data_set_bool(d, "reroute_audio", false)
+    obs.obs_source_update(src, d)
+    obs.obs_data_release(d)
+    obs.obs_source_set_monitoring_type(src, obs.OBS_MONITORING_TYPE_NONE)
+end
+
+local function make_silent_browser(name, url)
+    -- A helper page beside a scene's main overlay: no alerts, no sound.
+    local src = make_browser(name, url)
+    if src then no_mixer_channel(src) end
+    return src
+end
+
 local function place(scene, source, x, y, w, h)
     -- Add source to scene (if not already present) then set position + bounds.
     -- Sources are added in call order, so call bottom-layer sources first.
@@ -562,8 +581,9 @@ local function build_redact(scene, base, socket_url)
     if not settings_ref then return end
     if not obs.obs_data_get_bool(settings_ref, "redact_overlay") then return end
 
-    local url = base .. "/redact"
-    local src = make_browser("IVGO: Redact", append_socket_url(url, socket_url))
+    -- The scene's main overlay plays the alerts: no second copy here.
+    local url = base .. "/redact?toasts=0&egg_off=1&raid_bg_off=1&sound=0"
+    local src = make_silent_browser("IVGO: Redact", append_socket_url(url, socket_url))
     if src then
         configure_stateful_source(src)
         place(scene, src, 0, 0, 1920, 1080)
@@ -589,8 +609,9 @@ local function build_resonance(scene, base, socket_url)
     local filter_source = obs.obs_data_get_string(settings_ref, "resonance_filter_source")
     local filter_name   = obs.obs_data_get_string(settings_ref, "resonance_filter_name")
 
-    local url = base .. "/resonance"
-    local sep = "?"
+    -- The scene's main overlay plays the alerts: no second copy here.
+    local url = base .. "/resonance?toasts=0&egg_off=1&raid_bg_off=1&sound=0"
+    local sep = "&"
     if music_source and music_source ~= "" then
         url = url .. sep .. "music_source=" .. urlencode(music_source); sep = "&"
     end
@@ -610,7 +631,7 @@ local function build_resonance(scene, base, socket_url)
         url = url .. sep .. "filter_name=" .. urlencode(filter_name); sep = "&"
     end
 
-    local src = make_browser("IVGO: Resonance", append_socket_url(url, socket_url))
+    local src = make_silent_browser("IVGO: Resonance", append_socket_url(url, socket_url))
     if src then
         configure_stateful_source(src)
         place(scene, src, 0, 0, 1920, 1080)
@@ -731,13 +752,13 @@ local function build_game(base, socket_url, np_base)
         obs.obs_source_release(overlay)
     end
 
-    local cam_frame = make_browser("IVGO: Cam Outline", append_socket_url(base .. "/game-cam-outline?toasts=0", socket_url))
+    local cam_frame = make_silent_browser("IVGO: Cam Outline", append_socket_url(base .. "/game-cam-outline?toasts=0&sound=0", socket_url))
     if cam_frame then
         place(scene, cam_frame, 0, 0, 1920, 1080)
         obs.obs_source_release(cam_frame)
     end
 
-    local chat = make_browser("IVGO: Chat",             append_socket_url(base .. "/game-chat?toasts=0", socket_url))
+    local chat = make_silent_browser("IVGO: Chat",      append_socket_url(base .. "/game-chat?toasts=0&sound=0", socket_url))
     if chat then
         place(scene, chat, 0, 0, 1920, 1080)
         obs.obs_source_release(chat)
@@ -778,7 +799,7 @@ local function build_camera(base, host, host_role, socket_url, np_base)
         obs.obs_source_release(overlay)
     end
 
-    local chat = make_browser("IVGO: Camera Chat", append_socket_url(base .. "/camera-chat?toasts=0", socket_url))
+    local chat = make_silent_browser("IVGO: Camera Chat", append_socket_url(base .. "/camera-chat?toasts=0&sound=0", socket_url))
     if chat then
         place(scene, chat, 0, 0, 1920, 1080)
         obs.obs_source_release(chat)
@@ -1121,18 +1142,9 @@ local function open_vertical_canvas()
     return canvas, width, height
 end
 
-local function no_mixer_channel(src)
-    -- A vertical page (?canvas=vertical) plays no sound, since the main
-    -- canvas's page already plays each alert. Keep it out of OBS's mixer,
-    -- so there's no second fader to unmute by mistake.
-    local d = obs.obs_source_get_settings(src)
-    obs.obs_data_set_bool(d, "reroute_audio", false)
-    obs.obs_source_update(src, d)
-    obs.obs_data_release(d)
-end
-
 local function make_vertical_overlay(name, url)
-    -- A 1080x1920 browser source for a vertical scene, with no fader.
+    -- A 1080x1920 browser source for a vertical scene. The page plays no
+    -- sound (canvas=vertical), so it has no fader either.
     local src = make_browser(name, url, 1080, 1920)
     if src then no_mixer_channel(src) end
     return src
@@ -1430,7 +1442,7 @@ local function build_arranging(base, piece, collection, sprints_total, focus_min
         obs.obs_source_release(kb)
     end
 
-    local kb_frame = make_browser("IVGO: Arranging Keyboard Frame", base .. "/keyboard-frame?toasts=0")
+    local kb_frame = make_silent_browser("IVGO: Arranging Keyboard Frame", base .. "/keyboard-frame?toasts=0&sound=0")
     if kb_frame then
         place(kb_scene, kb_frame, 0, 0, 1920, 1080)
         obs.obs_source_release(kb_frame)
@@ -1461,13 +1473,13 @@ local function build_arranging(base, piece, collection, sprints_total, focus_min
         obs.obs_source_release(overlay)
     end
 
-    local cam_frame = make_browser("IVGO: Arranging Cam Outline", append_socket_url(base .. "/arranging-cam-outline?toasts=0", socket_url))
+    local cam_frame = make_silent_browser("IVGO: Arranging Cam Outline", append_socket_url(base .. "/arranging-cam-outline?toasts=0&sound=0", socket_url))
     if cam_frame then
         place(scene, cam_frame, 0, 0, 1920, 1080)
         obs.obs_source_release(cam_frame)
     end
 
-    local chat = make_browser("IVGO: Arranging Chat", append_socket_url(base .. "/arranging-chat?toasts=0", socket_url))
+    local chat = make_silent_browser("IVGO: Arranging Chat", append_socket_url(base .. "/arranging-chat?toasts=0&sound=0", socket_url))
     if chat then
         place(scene, chat, 0, 0, 1920, 1080)
         obs.obs_source_release(chat)
