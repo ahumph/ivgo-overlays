@@ -250,6 +250,7 @@ For the now-playing source: `http://localhost:7779/scenes/09-now-playing.html?de
 | Game Overlay | Browser (`/game`) | 0, 0 | 1920×1080 |
 | Cam Outline | Browser (`/game-cam-outline?toasts=0`) | 0, 0 | 1920×1080 |
 | Chat | Browser (`/game-chat?toasts=0`) | 0, 0 | 1920×1080 |
+| Clearance | Browser (`/clearance?toasts=0&sound=0`). CONTROL Resonant top five, shows itself only while live on that game | 0, 0 | 1920×1080 |
 | Now Playing | Browser (`http://localhost:7779/scenes/09-now-playing.html?debug=0`) | 0, 110 | 1920×1080 |
 | Commands Card | Browser (`/help?toasts=0&egg_off=1&raid_bg_off=1&help_items=...`) | 0, 0 | 1920×1080 |
 | WeeMan Avatars | Browser (`/weeman?toasts=0&egg_off=1&raid_bg_off=1&channel=...`) | 0, 0 | 1920×1080 |

@@ -638,6 +638,19 @@ local function build_help(scene, base, socket_url, np_base)
     end
 end
 
+-- CONTROL Resonant clearance top five, top left under the header. ivgo-ex
+-- says when to show it (live on Control Resonant, same as !clockin), so it
+-- sits in the Game scene for every game and stays empty otherwise. Needs the
+-- Phoenix backend for the board.
+local function build_clearance(scene, base, socket_url)
+    if not socket_url or socket_url == "" then return end
+    local src = make_silent_browser("IVGO: Clearance", append_socket_url(base .. "/clearance?toasts=0&sound=0", socket_url))
+    if src then
+        place(scene, src, 0, 0, 1920, 1080)
+        obs.obs_source_release(src)
+    end
+end
+
 local function build_now_playing(scene, np_base, y_offset)
     if not np_base or np_base == "" then return end
     local src = make_browser("IVGO: Now Playing", np_base .. "/scenes/09-now-playing.html?debug=0")
@@ -691,6 +704,7 @@ local function build_game(base, socket_url, np_base)
     --   3. 02-game.html         header + ticker chrome (transparent)
     --   4. 02-cam-outline.html  chamfered cam border frame (transparent)
     --   5. 02-chat.html         chat panel bottom-right (transparent)
+    --   6. 15-clearance.html    clearance top five, top left (CONTROL only)
 
     local scene_src = get_scene_source("IVGO · 02 Game")
     local scene     = obs.obs_scene_from_source(scene_src)
@@ -725,6 +739,8 @@ local function build_game(base, socket_url, np_base)
         place(scene, chat, 0, 0, 1920, 1080)
         obs.obs_source_release(chat)
     end
+
+    build_clearance(scene, base, socket_url)
 
     -- 02 Game's cam PiP sits top-right where the !PLAYING label normally
     -- lives — shift the now-playing source down 110px so the label clears it.
