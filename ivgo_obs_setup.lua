@@ -638,12 +638,23 @@ local function build_help(scene, base, socket_url, np_base)
     end
 end
 
--- CONTROL Resonant clearance top five, top left under the header. ivgo-ex
--- says when to show it (live on Control Resonant, same as !clockin), so it
--- sits in the Game scene for every game and stays empty otherwise. Needs the
--- Phoenix backend for the board.
+-- CONTROL Resonant clearance top five, top left under the header. Hidden
+-- until anyone types !board, then up for 10 seconds. ivgo-ex only answers
+-- that while live on Control Resonant, so it sits in the Game scene for
+-- every game. Needs the Phoenix backend for the board. Off unless the
+-- "Clearance board" box is ticked.
 local function build_clearance(scene, base, socket_url)
-    if not socket_url or socket_url == "" then return end
+    local on = settings_ref and obs.obs_data_get_bool(settings_ref, "clearance_board")
+    if not on or not socket_url or socket_url == "" then
+        -- Off: drop a source an earlier build left behind.
+        local old = obs.obs_get_source_by_name("IVGO: Clearance")
+        if old then
+            obs.obs_source_remove(old)
+            obs.obs_source_release(old)
+            print("[IVGO] Removed 'IVGO: Clearance'")
+        end
+        return
+    end
     local src = make_silent_browser("IVGO: Clearance", append_socket_url(base .. "/clearance?toasts=0&sound=0", socket_url))
     if src then
         place(scene, src, 0, 0, 1920, 1080)
@@ -1793,6 +1804,7 @@ function script_defaults(settings)
     obs.obs_data_set_default_bool  (settings, "weeman_bubbles", true)
     obs.obs_data_set_default_int   (settings, "weeman_mins", 15)
     obs.obs_data_set_default_bool  (settings, "help_card", true)
+    obs.obs_data_set_default_bool  (settings, "clearance_board", false)
 
     obs.obs_data_set_default_string(settings, "arr_piece",         "AERITH'S SUITE")
     obs.obs_data_set_default_string(settings, "arr_collection",    "FINAL FANTASY VII REBIRTH")
@@ -1930,6 +1942,11 @@ function script_properties()
         obs.OBS_TEXT_INFO)
     add_int(props, "weeman_mins", "WeeMan: minutes on screen", 1, 120, 1)
     obs.obs_properties_add_bool(props, "weeman_bubbles", "WeeMan: show chat speech bubbles")
+
+    obs.obs_properties_add_bool(props, "clearance_board", "Clearance board (CONTROL Resonant, chat !board)")
+    obs.obs_properties_add_text(props, "_clearance_board_hint",
+        "Adds the clearance top five to 02 Game. Anyone types !board to show it for 10 seconds (30 second cooldown), only while live on Control Resonant. Untick and build again to remove it.",
+        obs.OBS_TEXT_INFO)
 
     obs.obs_properties_add_bool(props, "help_card", "Commands card (chat !info)")
     obs.obs_properties_add_text(props, "_help_card_hint",
