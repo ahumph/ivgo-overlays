@@ -17,6 +17,7 @@ designed to work together in OBS.
 | 05 | Two Camera | Interview / collab — host left, guest right |
 | 06 | Ending | Outro screen with full-bleed video |
 | 07 | Arranging | Music-arranging coworking layout: display capture, host cam, Pianoteq keyboard band, task list, pomodoro timer, sliding info panel |
+| 18 | Mahjong | Opt in (Mahjong box). One-off mahjong stream: big table camera, hand camera, chat down the right, topic set by mods with `!topic` |
 
 Extras layered on every scene:
 
@@ -110,6 +111,12 @@ In OBS, switch to each scene and right-click the listed source(s) → **Properti
 |---|---|
 | `IVGO: Host Camera` | Your webcam |
 | `IVGO: Guest Camera` | Guest's video input — a second webcam, capture card, or NDI source for remote guests |
+
+### 18 Mahjong scene (only if the Mahjong box is ticked)
+| Source | What to pick |
+|---|---|
+| `IVGO: Table Camera` | The camera looking down at the table |
+| `IVGO: Hand Camera` | The camera on the player's tiles |
 
 ### 07 Arranging scene
 | Source | What to pick |
@@ -274,6 +281,18 @@ For the now-playing source: `http://localhost:7779/scenes/09-now-playing.html?de
 | Host Camera | Video Capture | 88, 72 | 904×858 |
 | Guest Camera | Video Capture | 1010, 72 | 904×858 |
 | Two-Cam Overlay | Browser (`/two-camera?host=...&guest=...&topic=...`) | 0, 0 | 1920×1080 |
+| Now Playing | Browser | 0, 0 | 1920×1080 |
+| Commands Card | Browser | 0, 0 | 1920×1080 |
+| WeeMan Avatars | Browser | 0, 0 | 1920×1080 |
+| Clip Player | Browser | 0, 0 | 1920×1080 |
+| Fire Overlay | Browser | 0, 0 | 1920×1080 |
+
+**18 Mahjong** (opt in)
+| Source | Type | Position | Size |
+|---|---|---|---|
+| Table Camera | Video Capture (fills and crops) | 24, 72 | 1394×874 |
+| Hand Camera | Video Capture | 1436, 72 | 460×259 |
+| Mahjong Overlay | Browser (`/mahjong?topic=...`) | 0, 0 | 1920×1080 |
 | Now Playing | Browser | 0, 0 | 1920×1080 |
 | Commands Card | Browser | 0, 0 | 1920×1080 |
 | WeeMan Avatars | Browser | 0, 0 | 1920×1080 |

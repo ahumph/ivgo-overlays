@@ -871,6 +871,50 @@ local function build_two_cam(base, host, host_role, guest, g_role, topic, socket
     obs.obs_source_release(scene_src)
 end
 
+-- One-off mahjong stream. Off unless the "Mahjong scene" box is ticked.
+local function build_mahjong(base, topic, socket_url, np_base)
+    -- Layer order bottom → top:
+    --   1. Table Camera  x:24,   y:72, w:1394, h:874  (filled and cropped)
+    --   2. Hand Camera   x:1436, y:72, w:460,  h:259  (right column, top)
+    --   3. 18-mahjong.html frames, topic, nameplate and chat (transparent)
+
+    local scene_src = get_scene_source("IVGO · 18 Mahjong")
+    local scene     = obs.obs_scene_from_source(scene_src)
+
+    local table_cam = make_capture("IVGO: Table Camera", cam_type())
+    if table_cam then
+        local item = place(scene, table_cam, 24, 72, 1394, 874)
+        if item then
+            -- Fill the frame and crop the overflow, not letterbox.
+            obs.obs_sceneitem_set_bounds_type(item, obs.OBS_BOUNDS_SCALE_OUTER)
+            if obs.obs_sceneitem_set_bounds_crop then obs.obs_sceneitem_set_bounds_crop(item, true) end
+        end
+        obs.obs_source_release(table_cam)
+    end
+
+    local hand_cam = make_capture("IVGO: Hand Camera", cam_type())
+    if hand_cam then
+        place(scene, hand_cam, 1436, 72, 460, 259)
+        obs.obs_source_release(hand_cam)
+    end
+
+    local overlay = make_browser("IVGO: Mahjong Overlay",
+        append_socket_url(base .. "/mahjong?topic=" .. urlencode(topic), socket_url))
+    if overlay then
+        configure_alert_overlay(overlay)
+        place(scene, overlay, 0, 0, 1920, 1080)
+        obs.obs_source_release(overlay)
+    end
+
+    build_now_playing(scene, np_base)
+    build_help(scene, base, socket_url, np_base)
+    build_weeman(scene, base, socket_url)
+    build_clip(scene, base, socket_url)
+    build_fire(scene, base, socket_url)
+    build_card_pull(scene, base, socket_url)
+    obs.obs_source_release(scene_src)
+end
+
 -- Remote feed for an interview (a VDO.Ninja view link, say): a browser
 -- source whose URL is pasted into its Properties once. Unlike make_browser,
 -- an existing one keeps that URL on every re-run. Its audio goes to the
@@ -1536,8 +1580,14 @@ local function build_all()
         build_vertical_main(base, host, host_role, countdown_mins, socket_url)
     end
     build_arranging(base, arr_piece, arr_collection, arr_sprints_total, arr_focus_mins, arr_break_mins, socket_url, np_base)
+    -- One-off show: off unless ticked, same as the interview scenes.
+    local mahjong = obs.obs_data_get_bool(settings_ref, "mahjong_scene")
+    if mahjong then
+        build_mahjong(base, topic, socket_url, np_base)
+    end
 
-    print("[IVGO] Done — " .. (interviews and 12 or 7) .. " scenes created / refreshed.")
+    local count = 7 + (interviews and 5 or 0) + (mahjong and 1 or 0)
+    print("[IVGO] Done — " .. count .. " scenes created / refreshed.")
 end
 
 -- ── Now-Playing watcher auto-start ────────────────────────────────────────────
@@ -1787,6 +1837,7 @@ function script_defaults(settings)
     obs.obs_data_set_default_string(settings, "guest_role", "ROLE")
     obs.obs_data_set_default_string(settings, "topic",      "WHY VIDEO GAME MUSIC DESERVES A FULL ORCHESTRA")
     obs.obs_data_set_default_bool  (settings, "interview_scenes", false)
+    obs.obs_data_set_default_bool  (settings, "mahjong_scene", false)
     obs.obs_data_set_default_bool  (settings, "vertical_interview", false)
     obs.obs_data_set_default_bool  (settings, "vertical_scenes", false)
     obs.obs_data_set_default_string(settings, "interviewer_name", "PHOEBE")
@@ -1878,6 +1929,10 @@ function script_properties()
     obs.obs_properties_add_bool(props, "interview_scenes", "Interview scenes (IVGO · 17 Interview ...)")
     obs.obs_properties_add_text(props, "_interview_scenes_hint",
         "Only for interview shows: starting soon, welcome, talk, game and be right back, with remote feeds for the interviewer and guest. Leave unticked otherwise. Unticking doesn't delete scenes already made; remove those in OBS.",
+        obs.OBS_TEXT_INFO)
+    obs.obs_properties_add_bool(props, "mahjong_scene", "Mahjong scene (IVGO · 18 Mahjong)")
+    obs.obs_properties_add_text(props, "_mahjong_scene_hint",
+        "Only for the mahjong stream: a big table camera, a hand camera and chat down the right. Pick a camera for IVGO: Table Camera and IVGO: Hand Camera after the first build. Mods set the topic with !topic. Unticking doesn't delete the scene; remove it in OBS.",
         obs.OBS_TEXT_INFO)
     obs.obs_properties_add_bool(props, "vertical_interview", "Vertical interview scenes (needs the Aitum Vertical plugin)")
     obs.obs_properties_add_text(props, "_vertical_interview_hint",
