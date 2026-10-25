@@ -675,6 +675,12 @@ local function build_now_playing(scene, np_base, y_offset)
     end
 end
 
+-- The framed video slot on 01 Starting Soon and 06 Ending: L.video in
+-- HoldingScene (ivgo-ex's ivgo-shared.js). The vertical one is V.video
+-- times 1.5.
+local HOLDING_VIDEO = {24, 74, 1360, 765}
+local HOLDING_VIDEO_VERTICAL = {18, 93, 1044, 588}
+
 local function build_starting_soon(base, countdown_mins, socket_url, np_base)
     local url = base .. "/starting-soon?mic=1"
     if countdown_mins and countdown_mins > 0 then
@@ -689,7 +695,7 @@ local function build_starting_soon(base, countdown_mins, socket_url, np_base)
     -- stack, below the chrome browser source.
     local video = make_media("IVGO: Starting Soon Video", repo_dir() .. "/media/buts.mkv")
     if video then
-        place(scene, video, 0, 0, 1920, 1080)
+        place(scene, video, HOLDING_VIDEO[1], HOLDING_VIDEO[2], HOLDING_VIDEO[3], HOLDING_VIDEO[4])
         obs.obs_source_release(video)
     end
 
@@ -1292,7 +1298,7 @@ local function build_vertical_main(base, host, host_role, countdown_mins, socket
         countdown = "&mins=" .. tostring(countdown_mins) .. "&secs=0"
     end
     scene_for("IVGO · 01 Starting Soon", function(scene)
-        add(scene, make_media("IVGO: Starting Soon Video", repo_dir() .. "/media/buts.mkv"), full, true)
+        add(scene, make_media("IVGO: Starting Soon Video", repo_dir() .. "/media/buts.mkv"), HOLDING_VIDEO_VERTICAL, true)
         add(scene, make_vertical_overlay("IVGO: Starting Soon (Vertical)", url("/starting-soon", countdown)), full)
     end)
 
@@ -1326,7 +1332,7 @@ local function build_vertical_main(base, host, host_role, countdown_mins, socket
     end)
 
     scene_for("IVGO · 06 Ending", function(scene)
-        add(scene, make_media("IVGO: Ending Video", repo_dir() .. "/media/tetris.webm"), full, true)
+        add(scene, make_media("IVGO: Ending Video", repo_dir() .. "/media/tetris.webm"), HOLDING_VIDEO_VERTICAL, true)
         add(scene, make_vertical_overlay("IVGO: Ending (Vertical)", url("/ending")), full)
     end)
 
@@ -1392,7 +1398,7 @@ local function build_ending(base, socket_url, np_base)
     -- stack, below the chrome browser source.
     local video = make_media("IVGO: Ending Video", repo_dir() .. "/media/tetris.webm")
     if video then
-        place(scene, video, 0, 0, 1920, 1080)
+        place(scene, video, HOLDING_VIDEO[1], HOLDING_VIDEO[2], HOLDING_VIDEO[3], HOLDING_VIDEO[4])
         obs.obs_source_release(video)
     end
 
