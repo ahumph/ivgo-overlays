@@ -681,6 +681,52 @@ end
 local HOLDING_VIDEO = {24, 74, 1360, 765}
 local HOLDING_VIDEO_VERTICAL = {18, 93, 1044, 588}
 
+-- Scene, video source. The vertical scene is the name plus " (Vertical)".
+local HOLDING_VIDEOS = {
+    {"IVGO · 01 Starting Soon", "IVGO: Starting Soon Video"},
+    {"IVGO · 06 Ending",        "IVGO: Ending Video"},
+}
+
+local function fit_item(item, rect, fill)
+    -- Set the whole transform, so a source nudged by hand goes back in the
+    -- frame: top-left alignment, no rotation, no crop, sized to rect.
+    obs.obs_sceneitem_set_alignment(item, obs.OBS_ALIGN_LEFT + obs.OBS_ALIGN_TOP)
+    obs.obs_sceneitem_set_rot(item, 0)
+    local crop = obs.obs_sceneitem_crop()
+    obs.obs_sceneitem_set_crop(item, crop)
+    local pos = obs.vec2()
+    pos.x, pos.y = rect[1], rect[2]
+    obs.obs_sceneitem_set_pos(item, pos)
+    obs.obs_sceneitem_set_bounds_type(item, fill and obs.OBS_BOUNDS_SCALE_OUTER or obs.OBS_BOUNDS_SCALE_INNER)
+    obs.obs_sceneitem_set_bounds_alignment(item, 0)
+    local bounds = obs.vec2()
+    bounds.x, bounds.y = rect[3], rect[4]
+    obs.obs_sceneitem_set_bounds(item, bounds)
+    if fill and obs.obs_sceneitem_set_bounds_crop then obs.obs_sceneitem_set_bounds_crop(item, true) end
+end
+
+local function fit_in_scene(scene_src, source_name, rect, fill)
+    if not scene_src then return end
+    local scene = obs.obs_scene_from_source(scene_src)
+    local item = scene and obs.obs_scene_find_source(scene, source_name)
+    if item then fit_item(item, rect, fill) end
+    obs.obs_source_release(scene_src)
+end
+
+-- Put the Starting Soon and Ending videos in their frames, on both
+-- canvases. Only touches scenes and sources that already exist. Runs after
+-- each build and whenever OBS loads the scene collection.
+local function fit_holding_videos()
+    local canvas = obs.obs_get_canvas_by_name and obs.obs_get_canvas_by_name("Aitum Vertical")
+    for _, v in ipairs(HOLDING_VIDEOS) do
+        fit_in_scene(obs.obs_get_source_by_name(v[1]), v[2], HOLDING_VIDEO, false)
+        if canvas then
+            fit_in_scene(obs.obs_canvas_get_source_by_name(canvas, v[1] .. " (Vertical)"), v[2], HOLDING_VIDEO_VERTICAL, true)
+        end
+    end
+    if canvas then obs.obs_canvas_release(canvas) end
+end
+
 local function build_starting_soon(base, countdown_mins, socket_url, np_base)
     local url = base .. "/starting-soon?mic=1"
     if countdown_mins and countdown_mins > 0 then
@@ -1591,6 +1637,7 @@ local function build_all()
     if mahjong then
         build_mahjong(base, topic, socket_url, np_base)
     end
+    fit_holding_videos()
 
     local count = 7 + (interviews and 5 or 0) + (mahjong and 1 or 0)
     print("[IVGO] Done — " .. count .. " scenes created / refreshed.")
@@ -1820,6 +1867,17 @@ function script_load(settings)
     settings_ref = settings
     ensure_obs_websocket_enabled()
     maybe_start_now_playing_watcher()
+
+    -- Keep the Starting Soon and Ending videos in their frames without a
+    -- rebuild: on OBS start, on a scene collection switch, and now (when
+    -- the script is reloaded with scenes already loaded).
+    obs.obs_frontend_add_event_callback(function(event)
+        if event == obs.OBS_FRONTEND_EVENT_FINISHED_LOADING
+            or event == obs.OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED then
+            fit_holding_videos()
+        end
+    end)
+    fit_holding_videos()
 
     stop_clip_hotkey_id = obs.obs_hotkey_register_frontend(
         "ivgo_stop_clip", "IVGO: Stop clip player",
