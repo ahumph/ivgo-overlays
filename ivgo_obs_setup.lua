@@ -690,7 +690,8 @@ local HOLDING_VIDEOS = {
 local function fit_item(item, rect, fill)
     -- Set the whole transform, so a source nudged by hand goes back in the
     -- frame: top-left alignment, no rotation, no crop, sized to rect.
-    obs.obs_sceneitem_set_alignment(item, obs.OBS_ALIGN_LEFT + obs.OBS_ALIGN_TOP)
+    -- OBS_ALIGN_* are C macros that Lua doesn't get: LEFT is 1, TOP is 4.
+    obs.obs_sceneitem_set_alignment(item, 1 + 4)
     obs.obs_sceneitem_set_rot(item, 0)
     local crop = obs.obs_sceneitem_crop()
     obs.obs_sceneitem_set_crop(item, crop)
