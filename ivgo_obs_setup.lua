@@ -1011,49 +1011,148 @@ local function make_preroll(video)
     return make_media("IVGO: Preroll (File)", video)
 end
 
+-- The interview's remote cameras. Camera 2 is always the guest, and its
+-- name says so. Cameras 1 and 3 are the interviewers; 3 is optional. On the
+-- page (17-interview.html) they are interviewer, guest and interviewer2.
+local INTERVIEW_CAMS = {
+    {key = "cam1", name = "IVGO: Interview Camera 1"},
+    {key = "cam2", name = "IVGO: Interview Camera 2 (GUEST)"},
+    {key = "cam3", name = "IVGO: Interview Camera 3"},
+}
+
+-- Names before the cameras were numbered. Renamed in place on the next
+-- build, so the call links already pasted into them carry over.
+local OLD_CAM_NAMES = {
+    {"IVGO: Interviewer",     "IVGO: Interview Camera 1"},
+    {"IVGO: Interview Guest", "IVGO: Interview Camera 2 (GUEST)"},
+    {"IVGO: Interviewer 2",   "IVGO: Interview Camera 3"},
+}
+
+local function rename_old_cams()
+    for _, pair in ipairs(OLD_CAM_NAMES) do
+        local old = obs.obs_get_source_by_name(pair[1])
+        if old then
+            local taken = obs.obs_get_source_by_name(pair[2])
+            if taken then
+                obs.obs_source_release(taken)
+            else
+                obs.obs_source_set_name(old, pair[2])
+                print("[IVGO] Renamed '" .. pair[1] .. "' to '" .. pair[2] .. "'")
+            end
+            obs.obs_source_release(old)
+        end
+    end
+end
+
 -- Source rectangles {x, y, w, h} for the interview layouts. They must
 -- match LAYOUTS in ivgo-ex's priv/static/overlays/scenes/17-interview.html,
 -- which draws the frames and nameplates around them.
 local INTERVIEW_LAYOUTS = {
     starting = {
-        preroll     = {24, 74, 1360, 765},
+        preroll    = {24, 74, 1360, 765},
     },
     welcome = {
-        interviewer = {14, 66, 940, 529},
-        player      = {966, 66, 940, 529},
+        cam1       = {14, 66, 940, 529},
+        player     = {966, 66, 940, 529},
     },
     brb = {
-        preroll     = {24, 74, 1360, 765},
+        preroll    = {24, 74, 1360, 765},
     },
     talk = {
-        game        = {14, 607, 756, 425},
-        player      = {518, 885, 240, 135},
-        interviewer = {14, 66, 940, 529},
-        guest       = {966, 66, 940, 529},
+        game       = {14, 607, 756, 425},
+        player     = {518, 885, 240, 135},
+        cam1       = {14, 66, 940, 529},
+        cam2       = {966, 66, 940, 529},
+    },
+    game = {
+        game       = {10, 66, 1440, 810},
+        player     = {1116, 682, 320, 180},
+        cam1       = {1462, 330, 448, 252},
+        cam2       = {1462, 66, 448, 252},
+    },
+}
+
+-- With Camera 3 (a second interviewer): three equal cams across the top
+-- for Welcome and Talk, stacked down the right for Game. Must match LAYOUTS_TWO in
+-- 17-interview.html. Starting soon and BRB don't change.
+local INTERVIEW_LAYOUTS_TWO = {
+    starting = INTERVIEW_LAYOUTS.starting,
+    brb      = INTERVIEW_LAYOUTS.brb,
+    welcome = {
+        cam1        = {14, 66, 622, 350},
+        cam3        = {649, 66, 622, 350},
+        player      = {1284, 66, 622, 350},
+    },
+    talk = {
+        game        = {14, 428, 1074, 604},
+        player      = {838, 887, 240, 135},
+        cam1        = {14, 66, 622, 350},
+        cam2        = {649, 66, 622, 350},
+        cam3        = {1284, 66, 622, 350},
     },
     game = {
         game        = {10, 66, 1440, 810},
         player      = {1116, 682, 320, 180},
-        interviewer = {1462, 330, 448, 252},
-        guest       = {1462, 66, 448, 252},
+        cam2        = {1462, 66, 448, 252},
+        cam1        = {1462, 330, 448, 252},
+        cam3        = {1462, 594, 448, 252},
     },
 }
 
-local function build_interview_scene(scene_name, layout, back, overlay, preroll, base, socket_url, np_base)
+-- Scene item helpers for a source added on a re-run, after the overlay
+-- already sits in the scene: obs_scene_add puts it on top, over the
+-- overlay's frames and chat.
+local function scene_item_index(scene, name)
+    local found = nil
+    local items = obs.obs_scene_enum_items(scene)
+    if items then
+        for i, it in ipairs(items) do
+            if obs.obs_source_get_name(obs.obs_sceneitem_get_source(it)) == name then found = i end
+        end
+        obs.sceneitem_list_release(items)
+    end
+    return found
+end
+
+-- Moves item under the source named above_name if it sits over it.
+local function keep_below(scene, item, above_name)
+    if not item then return end
+    local mine  = scene_item_index(scene, obs.obs_source_get_name(obs.obs_sceneitem_get_source(item)))
+    local above = scene_item_index(scene, above_name)
+    if mine and above and mine > above then
+        -- Positions count from 0 at the bottom; taking above's slot pushes it up one.
+        obs.obs_sceneitem_set_order_position(item, above - 1)
+    end
+end
+
+-- Takes a source out of one scene (the source itself stays for others).
+local function remove_from_scene(scene, name)
+    local items = obs.obs_scene_enum_items(scene)
+    if items then
+        for _, it in ipairs(items) do
+            if obs.obs_source_get_name(obs.obs_sceneitem_get_source(it)) == name then
+                obs.obs_sceneitem_remove(it)
+            end
+        end
+        obs.sceneitem_list_release(items)
+    end
+end
+
+local function build_interview_scene(scene_name, layout, back, overlay, preroll, base, socket_url, np_base, two)
     -- Layer order bottom -> top, each only where the layout has a place
-    -- for it (INTERVIEW_LAYOUTS):
+    -- for it (INTERVIEW_LAYOUTS, or INTERVIEW_LAYOUTS_TWO with Camera 3):
     --   1. 17-interview.html?layer=back   branded background
     --   2. Preroll video
     --   3. Game Capture
     --   4. Host Camera (the player)
-    --   5. Interviewer and Interview Guest (remote feeds)
+    --   5. Interview Cameras 1, 2 (guest) and 3 (remote feeds)
     --   6. 17-interview.html   frames, nameplates, chat, donations, chrome
     local scene_src = get_scene_source(scene_name)
     local scene     = obs.obs_scene_from_source(scene_src)
-    local r         = INTERVIEW_LAYOUTS[layout]
+    local r         = (two and INTERVIEW_LAYOUTS_TWO or INTERVIEW_LAYOUTS)[layout]
 
     local function put(source, rect)
-        if source and rect then place(scene, source, rect[1], rect[2], rect[3], rect[4]) end
+        if source and rect then return place(scene, source, rect[1], rect[2], rect[3], rect[4]) end
     end
 
     place(scene, back, 0, 0, 1920, 1080)
@@ -1071,16 +1170,16 @@ local function build_interview_scene(scene_name, layout, back, overlay, preroll,
         if cam then obs.obs_source_release(cam) end
     end
 
-    if r.interviewer then
-        local interviewer = make_remote_feed("IVGO: Interviewer")
-        put(interviewer, r.interviewer)
-        if interviewer then obs.obs_source_release(interviewer) end
-    end
-
-    if r.guest then
-        local guest = make_remote_feed("IVGO: Interview Guest")
-        put(guest, r.guest)
-        if guest then obs.obs_source_release(guest) end
+    for _, cam in ipairs(INTERVIEW_CAMS) do
+        if r[cam.key] then
+            local feed = make_remote_feed(cam.name)
+            local item = put(feed, r[cam.key])
+            if feed then obs.obs_source_release(feed) end
+            keep_below(scene, item, obs.obs_source_get_name(overlay))
+        else
+            -- Camera 3 cleared: no empty frame left over from a three-camera build.
+            remove_from_scene(scene, cam.name)
+        end
     end
 
     place(scene, overlay, 0, 0, 1920, 1080)
@@ -1106,20 +1205,20 @@ local VERTICAL_CANVAS = "Aitum Vertical"
 -- V_LAYOUTS in ivgo-ex's 17-interview.html, times 1.5 (V_SCALE).
 local VERTICAL_LAYOUTS = {
     starting = {
-        preroll     = {18, 93, 1044, 588},
+        preroll    = {18, 93, 1044, 588},
     },
     welcome = {
-        interviewer = {18, 93, 1044, 690},
-        player      = {18, 795, 1044, 690},
+        cam1       = {18, 93, 1044, 690},
+        player     = {18, 795, 1044, 690},
     },
     talk = {
-        interviewer = {18, 93, 1044, 690},
-        guest       = {18, 795, 1044, 690},
-        game        = {18, 1497, 720, 405},
-        player      = {486, 1755, 240, 135},
+        cam1       = {18, 93, 1044, 690},
+        cam2       = {18, 795, 1044, 690},
+        game       = {18, 1497, 720, 405},
+        player     = {486, 1755, 240, 135},
     },
     brb = {
-        preroll     = {18, 93, 1044, 588},
+        preroll    = {18, 93, 1044, 588},
     },
 }
 
@@ -1269,15 +1368,12 @@ local function build_vertical_interview(base, params, preroll, socket_url)
                     place_fill(scene, cam, r.player)
                     if cam then obs.obs_source_release(cam) end
                 end
-                if r.interviewer then
-                    local feed = make_remote_feed("IVGO: Interviewer")
-                    place_fill(scene, feed, r.interviewer)
-                    if feed then obs.obs_source_release(feed) end
-                end
-                if r.guest then
-                    local feed = make_remote_feed("IVGO: Interview Guest")
-                    place_fill(scene, feed, r.guest)
-                    if feed then obs.obs_source_release(feed) end
+                for _, cam in ipairs(INTERVIEW_CAMS) do
+                    if r[cam.key] then
+                        local feed = make_remote_feed(cam.name)
+                        place_fill(scene, feed, r[cam.key])
+                        if feed then obs.obs_source_release(feed) end
+                    end
                 end
                 place(scene, overlay, 0, 0, 1080, 1920)
                 obs.obs_source_release(scene_src)
@@ -1387,7 +1483,7 @@ local function build_vertical_main(base, host, host_role, countdown_mins, socket
           "the Aitum Vertical dock yet, restart OBS.")
 end
 
-local function build_interview(base, interviewer, interviewer_role, guest, g_role, guest_credit, player, preroll_video, countdown_mins, socket_url, np_base, vertical)
+local function build_interview(base, interviewer, interviewer_role, interviewer2, interviewer2_role, guest, g_role, guest_credit, player, preroll_video, countdown_mins, socket_url, np_base, vertical)
     -- Five scenes, one overlay: starting soon, welcome, the interview (the
     -- conversation large), the interview with the game large, and be right
     -- back. The same overlay and background sources sit in all of them, so
@@ -1402,6 +1498,14 @@ local function build_interview(base, interviewer, interviewer_role, guest, g_rol
                    "&player="          .. urlencode(player)           ..
                    "&mins="            .. tostring(countdown_mins)    ..
                    "&mic=1&egg_off=1"
+    -- A second interviewer switches the page to its three-camera layouts.
+    local two = interviewer2 ~= nil and interviewer2 ~= ""
+    if two then
+        params = params .. "&interviewer2="     .. urlencode(interviewer2) ..
+                           "&interviewer2Role=" .. urlencode(interviewer2_role)
+    end
+
+    rename_old_cams()
 
     local back = make_browser("IVGO: Interview Background", base .. "/interview?layer=back")
     local overlay = make_browser("IVGO: Interview Overlay", append_socket_url(base .. "/interview?" .. params, socket_url))
@@ -1423,11 +1527,11 @@ local function build_interview(base, interviewer, interviewer_role, guest, g_rol
 
     local preroll = make_preroll(preroll_video)
 
-    build_interview_scene("IVGO · 17 Interview · Starting Soon", "starting", back, overlay, preroll, base, socket_url, np_base)
-    build_interview_scene("IVGO · 17 Interview · Welcome",       "welcome",  back, overlay, preroll, base, socket_url, np_base)
-    build_interview_scene("IVGO · 17 Interview · Talk",          "talk",     back, overlay, preroll, base, socket_url, np_base)
-    build_interview_scene("IVGO · 17 Interview · Game",          "game",     back, overlay, preroll, base, socket_url, np_base)
-    build_interview_scene("IVGO · 17 Interview · Be Right Back", "brb",      back, overlay, preroll, base, socket_url, np_base)
+    build_interview_scene("IVGO · 17 Interview · Starting Soon", "starting", back, overlay, preroll, base, socket_url, np_base, two)
+    build_interview_scene("IVGO · 17 Interview · Welcome",       "welcome",  back, overlay, preroll, base, socket_url, np_base, two)
+    build_interview_scene("IVGO · 17 Interview · Talk",          "talk",     back, overlay, preroll, base, socket_url, np_base, two)
+    build_interview_scene("IVGO · 17 Interview · Game",          "game",     back, overlay, preroll, base, socket_url, np_base, two)
+    build_interview_scene("IVGO · 17 Interview · Be Right Back", "brb",      back, overlay, preroll, base, socket_url, np_base, two)
 
     if vertical then build_vertical_interview(base, params, preroll, socket_url) end
 
@@ -1600,6 +1704,8 @@ local function build_all()
     local np_base        = obs.obs_data_get_string(settings_ref, "now_playing_http_base")
     local interviewer      = obs.obs_data_get_string(settings_ref, "interviewer_name")
     local interviewer_role = obs.obs_data_get_string(settings_ref, "interviewer_role")
+    local interviewer2      = obs.obs_data_get_string(settings_ref, "interviewer2_name")
+    local interviewer2_role = obs.obs_data_get_string(settings_ref, "interviewer2_role")
     local guest_credit     = obs.obs_data_get_string(settings_ref, "guest_credit")
     local preroll_video    = obs.obs_data_get_string(settings_ref, "preroll_video")
 
@@ -1621,7 +1727,7 @@ local function build_all()
     -- scene lists don't fill up with scenes they'll never use.
     local interviews = obs.obs_data_get_bool(settings_ref, "interview_scenes")
     if interviews then
-        build_interview(base, interviewer, interviewer_role, guest, g_role, guest_credit, host, preroll_video, countdown_mins, socket_url, np_base,
+        build_interview(base, interviewer, interviewer_role, interviewer2, interviewer2_role, guest, g_role, guest_credit, host, preroll_video, countdown_mins, socket_url, np_base,
                         obs.obs_data_get_bool(settings_ref, "vertical_interview"))
     elseif obs.obs_data_get_bool(settings_ref, "vertical_interview") then
         print("[IVGO] Vertical interview scenes need Interview scenes ticked too. Skipped.")
@@ -1906,6 +2012,8 @@ function script_defaults(settings)
     obs.obs_data_set_default_bool  (settings, "vertical_scenes", false)
     obs.obs_data_set_default_string(settings, "interviewer_name", "PHOEBE")
     obs.obs_data_set_default_string(settings, "interviewer_role", "HOST")
+    obs.obs_data_set_default_string(settings, "interviewer2_name", "")
+    obs.obs_data_set_default_string(settings, "interviewer2_role", "CO-HOST")
     obs.obs_data_set_default_string(settings, "guest_credit",     "")
     obs.obs_data_set_default_string(settings, "preroll_video",    "")
     obs.obs_data_set_default_int   (settings, "countdown_mins", 5)
@@ -1980,7 +2088,7 @@ function script_properties()
         obs.OBS_TEXT_INFO)
     add_text(props, "guest_name", "Guest name")
     obs.obs_properties_add_text(props, "_guest_name_hint",
-        "Two-Camera and Interview scenes.",
+        "Two-Camera and Interview scenes. In the interview the guest is Camera 2.",
         obs.OBS_TEXT_INFO)
     add_text(props, "guest_role", "Guest role")
     obs.obs_properties_add_text(props, "_guest_role_hint",
@@ -1992,7 +2100,7 @@ function script_properties()
         obs.OBS_TEXT_INFO)
     obs.obs_properties_add_bool(props, "interview_scenes", "Interview scenes (IVGO · 17 Interview ...)")
     obs.obs_properties_add_text(props, "_interview_scenes_hint",
-        "Only for interview shows: starting soon, welcome, talk, game and be right back, with remote feeds for the interviewer and guest. Leave unticked otherwise. Unticking doesn't delete scenes already made; remove those in OBS.",
+        "Only for interview shows: starting soon, welcome, talk, game and be right back, with remote feeds for up to three cameras. Camera 2 is the guest. Leave unticked otherwise. Unticking doesn't delete scenes already made; remove those in OBS.",
         obs.OBS_TEXT_INFO)
     obs.obs_properties_add_bool(props, "mahjong_scene", "Mahjong scene (IVGO · 18 Mahjong)")
     obs.obs_properties_add_text(props, "_mahjong_scene_hint",
@@ -2002,10 +2110,12 @@ function script_properties()
     obs.obs_properties_add_text(props, "_vertical_interview_hint",
         "Also builds the interview scenes on Aitum Vertical's 1080x1920 canvas, and links each to its main scene so switching the main scene switches the vertical one. Talk is used for both Talk and Game. Needs OBS 31.1 or later and Interview scenes ticked. Restart OBS after the first build so Aitum lists the new scenes.",
         obs.OBS_TEXT_INFO)
-    add_text(props, "interviewer_name", "Interviewer name")
-    add_text(props, "interviewer_role", "Interviewer role")
+    add_text(props, "interviewer_name", "Camera 1 name (interviewer)")
+    add_text(props, "interviewer_role", "Camera 1 role")
+    add_text(props, "interviewer2_name", "Camera 3 name (second interviewer)")
+    add_text(props, "interviewer2_role", "Camera 3 role")
     obs.obs_properties_add_text(props, "_interviewer_hint",
-        "Interview scenes only. The guest name and role above are used there too, and your host name labels the game.",
+        "Interview scenes only. Camera 2 is always the guest, named by Guest name and role above. After the build, paste each call link into its source: IVGO: Interview Camera 1, IVGO: Interview Camera 2 (GUEST) and IVGO: Interview Camera 3. Leave Camera 3 blank for one interviewer. Your host name labels the game. The vertical canvas shows Cameras 1 and 2.",
         obs.OBS_TEXT_INFO)
     add_text(props, "guest_credit", "Guest credit")
     obs.obs_properties_add_text(props, "_guest_credit_hint",
