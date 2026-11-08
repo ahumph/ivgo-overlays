@@ -7,3 +7,7 @@ tools/smtc-test.out.txt
 
 # Local git worktrees for parallel feature work — never commit
 .worktrees/
+
+# The interview layouts from the last build that reached the site
+layouts.cache.json
+layouts.cache.json.tmp
