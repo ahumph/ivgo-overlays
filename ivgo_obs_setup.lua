@@ -139,11 +139,12 @@ local function make_browser(name, url, width, height)
     return src
 end
 
-local function make_media(name, local_file)
+local function make_media(name, local_file, keep_file)
     -- Return owned FFmpeg Media Source ref, creating or updating settings.
     -- Used for the looping background videos on 01 Starting Soon / 06 Ending,
     -- so playback control (volume, restart, pause, hotkeys) lives in OBS
-    -- rather than buried in an HTML <video>.
+    -- rather than buried in an HTML <video>. With keep_file, local_file is
+    -- only the first file: one picked later in Properties survives rebuilds.
     local settings = {
         local_file          = local_file,
         is_local_file       = true,
@@ -154,7 +155,9 @@ local function make_media(name, local_file)
     local existing = obs.obs_get_source_by_name(name)
     if existing then
         local d = obs.obs_source_get_settings(existing)
-        obs.obs_data_set_string(d, "local_file",          settings.local_file)
+        if not keep_file then
+            obs.obs_data_set_string(d, "local_file",      settings.local_file)
+        end
         obs.obs_data_set_bool  (d, "is_local_file",       settings.is_local_file)
         obs.obs_data_set_bool  (d, "looping",             settings.looping)
         obs.obs_data_set_bool  (d, "restart_on_activate", settings.restart_on_activate)
@@ -524,9 +527,25 @@ local function configure_stateful_source(src)
     obs.calldata_destroy(cd)
 end
 
+-- On this scene the clip player plays random clips of the channel in the
+-- video frame, over "IVGO: BRB Video" (see sync_brb_audio).
+local BRB_SCENE = "IVGO · 04 Be Right Back"
+
+local function brb_reel_on()
+    return settings_ref ~= nil
+        and obs.obs_data_get_bool(settings_ref, "clip_player")
+        and obs.obs_data_get_bool(settings_ref, "brb_clips")
+end
+
 local function configure_clip_source(src)
     configure_stateful_source(src)
     configure_audio_source(src)
+    -- The BRB reel asks OBS which scene is live (obsstudio.getCurrentScene),
+    -- which needs page permission 2, "Read access to user information".
+    local d = obs.obs_source_get_settings(src)
+    obs.obs_data_set_int(d, "webpage_control_level", 2)
+    obs.obs_source_update(src, d)
+    obs.obs_data_release(d)
 end
 
 local function build_clip(scene, base, socket_url)
@@ -541,6 +560,9 @@ local function build_clip(scene, base, socket_url)
     end
     if size and size ~= "" then
         url = url .. "&clip_size=" .. size
+    end
+    if brb_reel_on() then
+        url = url .. "&reel_scene=" .. urlencode(BRB_SCENE)
     end
     local src = make_browser("IVGO: Clip Player", append_socket_url(url, socket_url))
     if src then
@@ -675,7 +697,8 @@ local function build_now_playing(scene, np_base, y_offset)
     end
 end
 
--- The framed video slot on 01 Starting Soon and 06 Ending: L.video in
+-- The framed video slot on 01 Starting Soon, 04 Be Right Back and 06
+-- Ending: L.video in
 -- HoldingScene (ivgo-ex's ivgo-shared.js). The vertical one is V.video
 -- times 1.5.
 local HOLDING_VIDEO = {24, 74, 1360, 765}
@@ -684,6 +707,7 @@ local HOLDING_VIDEO_VERTICAL = {18, 93, 1044, 588}
 -- Scene, video source. The vertical scene is the name plus " (Vertical)".
 local HOLDING_VIDEOS = {
     {"IVGO · 01 Starting Soon", "IVGO: Starting Soon Video"},
+    {"IVGO · 04 Be Right Back", "IVGO: BRB Video"},
     {"IVGO · 06 Ending",        "IVGO: Ending Video"},
 }
 
@@ -856,18 +880,26 @@ local function build_camera(base, host, host_role, socket_url, np_base)
 end
 
 local function build_brb(base, socket_url, np_base)
-    local scene_src = get_scene_source("IVGO · 04 Be Right Back")
+    -- Layer order bottom → top:
+    --   1. IVGO: BRB Video    in the frame, about.mkv until another file is
+    --                         picked in its Properties (kept on rebuild)
+    --   2. 04-brb.html        bars, cards and chat (transparent frame)
+    --   3. the shared layers, the clip player among them: on this scene it
+    --      plays random clips in the frame (brb_clips)
+    local scene_src = get_scene_source(BRB_SCENE)
     local scene     = obs.obs_scene_from_source(scene_src)
+    local video     = make_media("IVGO: BRB Video", repo_dir() .. "/media/about.mkv", true)
+    if video then
+        place(scene, video, HOLDING_VIDEO[1], HOLDING_VIDEO[2], HOLDING_VIDEO[3], HOLDING_VIDEO[4])
+        obs.obs_source_release(video)
+    end
     local src       = make_browser("IVGO: BRB", append_socket_url(base .. "/brb?mic=1", socket_url))
     if src then
         place(scene, src, 0, 0, 1920, 1080)
-        -- The page's own about.mkv <video> carries its audio, baked into the
-        -- browser source rather than a separate OBS media source. Browser
-        -- sources don't route their own audio into OBS's mixer by default,
-        -- so reroute_audio is needed for the stream to hear it at all - no
-        -- monitoring type change here, unlike build_fire/build_card_pull.
+        -- The page used to play about.mkv itself and needed its audio
+        -- rerouted. The video is its own source now, so turn that off.
         local d = obs.obs_source_get_settings(src)
-        obs.obs_data_set_bool(d, "reroute_audio", true)
+        obs.obs_data_set_bool(d, "reroute_audio", false)
         obs.obs_source_update(src, d)
         obs.obs_data_release(d)
         obs.obs_source_release(src)
@@ -1471,6 +1503,7 @@ local function build_vertical_main(base, host, host_role, countdown_mins, socket
     end)
 
     scene_for("IVGO · 04 Be Right Back", function(scene)
+        add(scene, make_media("IVGO: BRB Video", repo_dir() .. "/media/about.mkv", true), HOLDING_VIDEO_VERTICAL, true)
         add(scene, make_vertical_overlay("IVGO: BRB (Vertical)", url("/brb")), full)
     end)
 
@@ -1693,6 +1726,47 @@ local function build_arranging(base, piece, collection, sprints_total, focus_min
     obs.obs_source_release(scene_src)
 end
 
+-- The BRB video's sound is muted while the clip player is visible on 04 Be
+-- Right Back with the reel on, since the reel's clips play over it in the
+-- same frame. Hiding the clip player there (its eye in Sources) stops the
+-- reel and brings the video's sound back.
+local function sync_brb_audio()
+    local video = obs.obs_get_source_by_name("IVGO: BRB Video")
+    if not video then return end
+    local muted = false
+    if brb_reel_on() then
+        local scene_src = obs.obs_get_source_by_name(BRB_SCENE)
+        local scene = scene_src and obs.obs_scene_from_source(scene_src)
+        local item = scene and obs.obs_scene_find_source(scene, "IVGO: Clip Player")
+        muted = item ~= nil and obs.obs_sceneitem_visible(item)
+        if scene_src then obs.obs_source_release(scene_src) end
+    end
+    obs.obs_source_set_muted(video, muted)
+    obs.obs_source_release(video)
+end
+
+-- IVGO_BRB_WATCH is a global so a reloaded copy of this script (ivgo_update)
+-- can disconnect the old copy's handler before connecting its own.
+local function unwatch_brb_audio()
+    local w = IVGO_BRB_WATCH
+    if not w then return end
+    obs.signal_handler_disconnect(w.handler, "item_visible", w.fn)
+    obs.obs_source_release(w.source)
+    IVGO_BRB_WATCH = nil
+end
+
+local function watch_brb_audio()
+    unwatch_brb_audio()
+    local scene_src = obs.obs_get_source_by_name(BRB_SCENE)
+    if scene_src then
+        local handler = obs.obs_source_get_signal_handler(scene_src)
+        local fn = function(_) sync_brb_audio() end
+        obs.signal_handler_connect(handler, "item_visible", fn)
+        IVGO_BRB_WATCH = { source = scene_src, handler = handler, fn = fn }
+    end
+    sync_brb_audio()
+end
+
 local function build_all()
     local base       = scenes_base_url()
     local host       = obs.obs_data_get_string(settings_ref, "host_name")
@@ -1745,6 +1819,7 @@ local function build_all()
         build_mahjong(base, topic, socket_url, np_base)
     end
     fit_holding_videos()
+    watch_brb_audio()
 
     local count = 7 + (interviews and 5 or 0) + (mahjong and 1 or 0)
     print("[IVGO] Done — " .. count .. " scenes created / refreshed.")
@@ -1978,13 +2053,19 @@ function script_load(settings)
     -- Keep the Starting Soon and Ending videos in their frames without a
     -- rebuild: on OBS start, on a scene collection switch, and now (when
     -- the script is reloaded with scenes already loaded).
+    -- The BRB video's mute follows the clip player the same way.
     obs.obs_frontend_add_event_callback(function(event)
         if event == obs.OBS_FRONTEND_EVENT_FINISHED_LOADING
             or event == obs.OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED then
             fit_holding_videos()
+            watch_brb_audio()
+        elseif event == obs.OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGING
+            or event == obs.OBS_FRONTEND_EVENT_EXIT then
+            unwatch_brb_audio()
         end
     end)
     fit_holding_videos()
+    watch_brb_audio()
 
     stop_clip_hotkey_id = obs.obs_hotkey_register_frontend(
         "ivgo_stop_clip", "IVGO: Stop clip player",
@@ -2024,6 +2105,7 @@ function script_defaults(settings)
     obs.obs_data_set_default_string(settings, "twitch_channel", "irishvideogameorchestra")
     obs.obs_data_set_default_bool  (settings, "clip_player", true)
     obs.obs_data_set_default_string(settings, "clip_size", "large")
+    obs.obs_data_set_default_bool  (settings, "brb_clips", true)
     obs.obs_data_set_default_bool  (settings, "weeman_avatars", true)
     obs.obs_data_set_default_bool  (settings, "weeman_bubbles", true)
     obs.obs_data_set_default_int   (settings, "weeman_mins", 15)
@@ -2164,6 +2246,10 @@ function script_properties()
     obs.obs_property_list_add_string(clip_size, "Small — 960x540, top-left",      "small")
     obs.obs_properties_add_text(props, "_clip_size_hint",
         "Large covers the middle of the canvas; small tucks under the header bar in the top-left corner so gameplay stays readable. Rebuild scenes after changing.",
+        obs.OBS_TEXT_INFO)
+    obs.obs_properties_add_bool(props, "brb_clips", "Random clips on Be Right Back")
+    obs.obs_properties_add_text(props, "_brb_clips_hint",
+        "The clip player plays random clips of this channel in the Be Right Back video frame: the 50 most viewed from the last 90 days, topped up with older ones. Clips from chat and !so play next. To show your own video instead, pick a file in IVGO: BRB Video and hide IVGO: Clip Player on that scene. Rebuild scenes after changing.",
         obs.OBS_TEXT_INFO)
 
     obs.obs_properties_add_bool(props, "weeman_avatars", "WeeMan avatars (chat !weeman)")
