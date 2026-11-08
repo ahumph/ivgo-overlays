@@ -734,12 +734,17 @@ local function fit_in_scene(scene_src, source_name, rect, fill)
     if not scene_src then return end
     local scene = obs.obs_scene_from_source(scene_src)
     local item = scene and obs.obs_scene_find_source(scene, source_name)
-    if item then fit_item(item, rect, fill) end
+    if item then
+        fit_item(item, rect, fill)
+        -- Bottom of the scene, under the page that frames it. A video added
+        -- to a scene that already exists lands on top otherwise.
+        obs.obs_sceneitem_set_order(item, obs.OBS_ORDER_MOVE_BOTTOM or 3)
+    end
     obs.obs_source_release(scene_src)
 end
 
--- Put the Starting Soon and Ending videos in their frames, on both
--- canvases. Only touches scenes and sources that already exist. Runs after
+-- Put the Starting Soon, BRB and Ending videos in their frames, at the
+-- bottom of their scenes, on both canvases. Only touches scenes and sources that already exist. Runs after
 -- each build and whenever OBS loads the scene collection.
 local function fit_holding_videos()
     local canvas = obs.obs_get_canvas_by_name and obs.obs_get_canvas_by_name("Aitum Vertical")
