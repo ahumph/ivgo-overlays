@@ -530,6 +530,10 @@ end
 -- On this scene the clip player plays random clips of the channel in the
 -- video frame, over "IVGO: BRB Video" (see sync_brb_audio).
 local BRB_SCENE = "IVGO · 04 Be Right Back"
+-- Where the reel plays on the clip player's 1920x1080 page: 11-clip.html's
+-- default reel_rect, and HoldingScene's L.video. The vertical BRB crops
+-- the clip player to it.
+local REEL_RECT = {24, 74, 1360, 765}
 
 local function brb_reel_on()
     return settings_ref ~= nil
@@ -1598,6 +1602,26 @@ local function build_vertical_main(base, host, host_role, countdown_mins, socket
     scene_for("IVGO · 04 Be Right Back", function(scene)
         add(scene, make_media("IVGO: BRB Video", repo_dir() .. "/media/about.mkv", true), HOLDING_VIDEO_VERTICAL, true)
         add(scene, make_vertical_overlay("IVGO: BRB (Vertical)", url("/brb")), full)
+        -- The clip reel: the main canvas's IVGO: Clip Player itself, so both
+        -- canvases show the same clip with one sound. Cropped to the reel's
+        -- frame (REEL_RECT) and fitted to the video slot, under the overlay.
+        if brb_reel_on() then
+            local clip = obs.obs_get_source_by_name("IVGO: Clip Player")
+            if clip then
+                local item = place_fill(scene, clip, HOLDING_VIDEO_VERTICAL)
+                if item then
+                    local crop = obs.obs_sceneitem_crop()
+                    crop.left, crop.top = REEL_RECT[1], REEL_RECT[2]
+                    crop.right = 1920 - REEL_RECT[1] - REEL_RECT[3]
+                    crop.bottom = 1080 - REEL_RECT[2] - REEL_RECT[4]
+                    obs.obs_sceneitem_set_crop(item, crop)
+                    keep_below(scene, item, "IVGO: BRB (Vertical)")
+                end
+                obs.obs_source_release(clip)
+            end
+        else
+            remove_from_scene(scene, "IVGO: Clip Player")
+        end
     end)
 
     scene_for("IVGO · 06 Ending", function(scene)
@@ -1830,7 +1854,8 @@ end
 -- The BRB video's sound is muted while the clip player is visible on 04 Be
 -- Right Back with the reel on, since the reel's clips play over it in the
 -- same frame. Hiding the clip player there (its eye in Sources) stops the
--- reel and brings the video's sound back.
+-- reel and brings the video's sound back. With vertical scenes, hide it on
+-- the vertical BRB too, or the reel keeps going there.
 local function sync_brb_audio()
     local video = obs.obs_get_source_by_name("IVGO: BRB Video")
     if not video then return end
@@ -2364,7 +2389,7 @@ function script_properties()
         obs.obs_property_list_add_string(clip_size, "Small: 960x540, top left", "small")
         tip(clip_size, "Large covers the middle of the canvas. Small tucks under the header bar in the top left so gameplay stays readable.")
         tip(obs.obs_properties_add_bool(g, "brb_clips", "Random clips on Be Right Back"),
-            "Plays this channel's clips in the Be Right Back frame: the 50 most viewed from the last 90 days, topped up with older ones. Clips from chat and !so play next. To show your own video, pick a file in IVGO: BRB Video and hide IVGO: Clip Player on that scene.")
+            "Plays this channel's clips in the Be Right Back frame: the 50 most viewed from the last 90 days, topped up with older ones. Clips from chat and !so play next. To show your own video, pick a file in IVGO: BRB Video and hide IVGO: Clip Player on that scene, and on the vertical one too.")
         tip(obs.obs_properties_add_bool(g, "weeman_avatars", "WeeMan avatars (chat !weeman)"),
             "Viewers type !weeman to send a WeeMan walking along the bottom of the stream, in their chat colour with their name. One each, 20 at once. Mods clear them with !weemanclear.")
         tip(add_int(g, "weeman_mins", "WeeMan: minutes on screen", 1, 120, 1), "How long each WeeMan stays.")
