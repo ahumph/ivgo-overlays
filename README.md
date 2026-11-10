@@ -18,6 +18,7 @@ designed to work together in OBS.
 | 06 | Ending | Outro screen with full-bleed video |
 | 07 | Arranging | Music-arranging coworking layout: display capture, host cam, Pianoteq keyboard band, task list, pomodoro timer, sliding info panel |
 | 18 | Mahjong | Opt in (Mahjong box). One-off mahjong stream: big table camera, hand camera, chat down the right, topic set by mods with `!topic` |
+| 19 | Bracket | Opt in (Bracket box). The whole Bracket Showdown, live: 16 pieces of game music, round 1 on the outside, the final under the host cam |
 
 Extras layered on every scene:
 
@@ -61,7 +62,7 @@ This creates all the scenes and their sources automatically. Re-run it any time 
 
 ## 2 — Fill in your details
 
-These appear on the right when the script is selected, in sections: Show, Interview scenes, Two-Camera and Mahjong, Chat extras, Arranging and Advanced. Hover over a field for what it does. All have sensible defaults, so change the ones that apply to you and leave the rest.
+These appear on the right when the script is selected, in sections: Show, Interview scenes, Two-Camera, Mahjong and Bracket, Chat extras, Arranging and Advanced. Hover over a field for what it does. All have sensible defaults, so change the ones that apply to you and leave the rest.
 
 | Field | What it does |
 |---|---|
@@ -118,6 +119,9 @@ In OBS, switch to each scene and right-click the listed source(s) → **Properti
 |---|---|
 | `IVGO: Table Camera` | The camera looking down at the table |
 | `IVGO: Hand Camera` | The camera on the player's tiles |
+
+### 19 Bracket scene (only if the Bracket box is ticked)
+Nothing to pick: it uses `IVGO: Host Camera`, placed above the page under the final.
 
 ### 07 Arranging scene
 | Source | What to pick |
@@ -202,6 +206,25 @@ The Phoenix backend (`ivgo-ex`) listens to chat and broadcasts to the overlays. 
 | `!weemanclear` | Send every WeeMan avatar home. They walk off rather than vanishing. |
 | `!so <user>` / `!shoutout <user>` | Play one of that streamer's own Featured Clips (picked at random) in the centered panel, styled amber. Falls back to their most-viewed clip if they haven't set a featured shelf; does nothing if they have no clips. Mods are exempt from the per-viewer clip cooldown. |
 
+### Bracket Showdown
+
+A bracket of 16 pieces of game music, M1 to M15. Set it up and run it from `/admin/brackets` on the website: enter the 16 pieces, shuffle, start. Pieces are numbered in bracket order, so M1 is #1 v #2 and M5 is #9 v #10. Chat votes; the host picks each winner, and chat's split shows beside it. These commands only work while a bracket is live.
+
+| Command | Who | What it does |
+|---|---|---|
+| `!1` to `!16` | Anyone | Vote for that piece in whichever matchup it is in. One vote per viewer per matchup; the other number switches it. No chat reply. A viewer's first vote in a matchup pops a small toast. |
+| `!matchup <n>` | Mods | Show the card for matchup n on 02 Game and 03 Camera. `!matchup` alone hides it. |
+| `!win <n>` | Mods | Piece #n wins its matchup. The small bracket shows on its own 8 seconds later, for 20 seconds. |
+| `!undo` | Mods | Reopen the last called matchup, if the next one isn't called yet. |
+| `!bracket` | Mods | Show or hide the small bracket on 02 Game and 03 Camera. |
+
+The card and the small bracket take the top left of 02 Game and 03 Camera, so the watch-time board stays hidden while either shows. Test the layout with `?bracket_test=1` on `/game`, `/camera` or `/bracket`.
+
+**Keep the VOD clean.** Commercial soundtracks can get the VOD muted. To keep the music off the VOD but on the live stream:
+
+1. Settings, Output, Output Mode: Advanced. On the Streaming tab, tick **Twitch VOD Track** and pick a track, say Track 2.
+2. Edit, Advanced Audio Properties. On the source the music plays from (a media player window, a browser tab, a desktop audio device), tick Track 1 and untick Track 2. Leave your mic and game on both.
+
 > The timer does **not** auto-advance when it hits zero — phase changes only happen on explicit `!pomo start` / `stop` / `reset` / `next`. This is deliberate: keeps the chat in the loop on cadence.
 
 ---
@@ -258,7 +281,6 @@ For the now-playing source: `http://localhost:7779/scenes/09-now-playing.html?de
 | Game Overlay | Browser (`/game`) | 0, 0 | 1920×1080 |
 | Cam Outline | Browser (`/game-cam-outline?toasts=0`) | 0, 0 | 1920×1080 |
 | Chat | Browser (`/game-chat?toasts=0`) | 0, 0 | 1920×1080 |
-| Clearance | Browser (`/clearance?toasts=0&sound=0`). CONTROL Resonant top five, shown for 10s when anyone types !board. Only built with "Clearance board" ticked | 0, 0 | 1920×1080 |
 | Now Playing | Browser (`http://localhost:7779/scenes/09-now-playing.html?debug=0`) | 0, 110 | 1920×1080 |
 | Commands Card | Browser (`/help?toasts=0&egg_off=1&raid_bg_off=1&help_items=...`) | 0, 0 | 1920×1080 |
 | WeeMan Avatars | Browser (`/weeman?toasts=0&egg_off=1&raid_bg_off=1&channel=...`) | 0, 0 | 1920×1080 |
@@ -294,6 +316,17 @@ For the now-playing source: `http://localhost:7779/scenes/09-now-playing.html?de
 | Table Camera | Video Capture (fills and crops) | 24, 72 | 1394×874 |
 | Hand Camera | Video Capture | 1436, 72 | 460×259 |
 | Mahjong Overlay | Browser (`/mahjong?topic=...`) | 0, 0 | 1920×1080 |
+| Now Playing | Browser | 0, 0 | 1920×1080 |
+| Commands Card | Browser | 0, 0 | 1920×1080 |
+| WeeMan Avatars | Browser | 0, 0 | 1920×1080 |
+| Clip Player | Browser | 0, 0 | 1920×1080 |
+| Fire Overlay | Browser | 0, 0 | 1920×1080 |
+
+**19 Bracket** (opt in)
+| Source | Type | Position | Size |
+|---|---|---|---|
+| Bracket Overlay | Browser (`/bracket`). Has its own background | 0, 0 | 1920×1080 |
+| Host Camera | Video Capture, above the overlay | 756, 580 | 408×230 |
 | Now Playing | Browser | 0, 0 | 1920×1080 |
 | Commands Card | Browser | 0, 0 | 1920×1080 |
 | WeeMan Avatars | Browser | 0, 0 | 1920×1080 |

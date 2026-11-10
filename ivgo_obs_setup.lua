@@ -664,27 +664,16 @@ local function build_help(scene, base, socket_url, np_base)
     end
 end
 
--- CONTROL Resonant clearance top five, top left under the header. Hidden
--- until anyone types !board, then up for 10 seconds. ivgo-ex only answers
--- that while live on Control Resonant, so it sits in the Game scene for
--- every game. Needs the Phoenix backend for the board. Off unless the
--- "Clearance board" box is ticked.
-local function build_clearance(scene, base, socket_url)
-    local on = settings_ref and obs.obs_data_get_bool(settings_ref, "clearance_board")
-    if not on or not socket_url or socket_url == "" then
-        -- Off: drop a source an earlier build left behind.
-        local old = obs.obs_get_source_by_name("IVGO: Clearance")
-        if old then
-            obs.obs_source_remove(old)
-            obs.obs_source_release(old)
-            print("[IVGO] Removed 'IVGO: Clearance'")
-        end
-        return
-    end
-    local src = make_silent_browser("IVGO: Clearance", append_socket_url(base .. "/clearance?toasts=0&sound=0", socket_url))
-    if src then
-        place(scene, src, 0, 0, 1920, 1080)
-        obs.obs_source_release(src)
+-- The watch-time board (!board, !skills, !dads) and the Bracket Showdown
+-- card and inset are drawn by 02 Game's own overlay page now, so the old
+-- separate clearance source (its /clearance page is gone) is removed if an
+-- earlier build left one behind.
+local function remove_old_clearance()
+    local old = obs.obs_get_source_by_name("IVGO: Clearance")
+    if old then
+        obs.obs_source_remove(old)
+        obs.obs_source_release(old)
+        print("[IVGO] Removed 'IVGO: Clearance'")
     end
 end
 
@@ -810,7 +799,8 @@ local function build_game(base, socket_url, np_base)
     --   3. 02-game.html         header + ticker chrome (transparent)
     --   4. 02-cam-outline.html  chamfered cam border frame (transparent)
     --   5. 02-chat.html         chat panel bottom-right (transparent)
-    --   6. 15-clearance.html    clearance top five, top left (CONTROL only)
+    -- 02-game.html also draws the watch-time board and the Bracket
+    -- Showdown card and inset, top left, when chat or the admin page asks.
 
     local scene_src = get_scene_source("IVGO · 02 Game")
     local scene     = obs.obs_scene_from_source(scene_src)
@@ -846,7 +836,7 @@ local function build_game(base, socket_url, np_base)
         obs.obs_source_release(chat)
     end
 
-    build_clearance(scene, base, socket_url)
+    remove_old_clearance()
 
     -- 02 Game's cam PiP sits top-right where the !PLAYING label normally
     -- lives — shift the now-playing source down 110px so the label clears it.
@@ -987,6 +977,34 @@ local function build_mahjong(base, topic, socket_url, np_base)
         configure_alert_overlay(overlay)
         place(scene, overlay, 0, 0, 1920, 1080)
         obs.obs_source_release(overlay)
+    end
+
+    add_shared_layers(scene, base, socket_url, np_base)
+    obs.obs_source_release(scene_src)
+end
+
+-- Bracket Showdown: the whole bracket, live from ivgo-ex. Off unless the
+-- "Bracket scene" box is ticked. Run the show from /admin/brackets.
+local function build_bracket(base, socket_url, np_base)
+    -- Layer order bottom → top:
+    --   1. 19-bracket.html  bracket, live matchup, header and ticker (opaque)
+    --   2. Host Camera      x:756, y:580, w:408, h:230 (above the page, which
+    --                       has its own background and draws the cam frame)
+
+    local scene_src = get_scene_source("IVGO · 19 Bracket")
+    local scene     = obs.obs_scene_from_source(scene_src)
+
+    local overlay = make_browser("IVGO: Bracket Overlay", append_socket_url(base .. "/bracket?mic=1", socket_url))
+    if overlay then
+        configure_alert_overlay(overlay)
+        place(scene, overlay, 0, 0, 1920, 1080)
+        obs.obs_source_release(overlay)
+    end
+
+    local cam = make_capture("IVGO: Host Camera", cam_type())
+    if cam then
+        place(scene, cam, 756, 580, 408, 230)
+        obs.obs_source_release(cam)
     end
 
     add_shared_layers(scene, base, socket_url, np_base)
@@ -1988,10 +2006,14 @@ local function build_all()
     if mahjong then
         build_mahjong(base, topic, socket_url, np_base)
     end
+    local bracket = obs.obs_data_get_bool(settings_ref, "bracket_scene")
+    if bracket then
+        build_bracket(base, socket_url, np_base)
+    end
     fit_holding_videos()
     watch_brb_audio()
 
-    local count = 7 + (interviews and (gameplay and 5 or 4) or 0) + (mahjong and 1 or 0)
+    local count = 7 + (interviews and (gameplay and 5 or 4) or 0) + (mahjong and 1 or 0) + (bracket and 1 or 0)
     print("[IVGO] Done — " .. count .. " scenes created / refreshed.")
 end
 
@@ -2282,7 +2304,7 @@ function script_defaults(settings)
     obs.obs_data_set_default_bool  (settings, "weeman_bubbles", true)
     obs.obs_data_set_default_int   (settings, "weeman_mins", 15)
     obs.obs_data_set_default_bool  (settings, "help_card", true)
-    obs.obs_data_set_default_bool  (settings, "clearance_board", false)
+    obs.obs_data_set_default_bool  (settings, "bracket_scene", false)
 
     obs.obs_data_set_default_string(settings, "arr_piece",         "AERITH'S SUITE")
     obs.obs_data_set_default_string(settings, "arr_collection",    "FINAL FANTASY VII REBIRTH")
@@ -2373,12 +2395,14 @@ function script_properties()
             obs.OBS_TEXT_INFO)
     end)
 
-    section(props, "grp_other", "Two-Camera and Mahjong", false, function(g)
+    section(props, "grp_other", "Two-Camera, Mahjong and Bracket", false, function(g)
         tip(add_text(g, "guest_name", "Guest name"), "The 05 Two Camera scene's guest.")
         tip(add_text(g, "guest_role", "Guest role"), "The 05 Two Camera scene's guest.")
         tip(add_text(g, "topic", "Topic"), "Shown in the topic strip of the Two-Camera scene.")
         tip(obs.obs_properties_add_bool(g, "mahjong_scene", "Mahjong scene (IVGO · 18 Mahjong)"),
             "A big table camera, a hand camera and chat down the right. Pick a camera for IVGO: Table Camera and IVGO: Hand Camera after the first build. Mods set the topic with !topic. Unticking doesn't delete the scene; remove it in OBS.")
+        tip(obs.obs_properties_add_bool(g, "bracket_scene", "Bracket scene (IVGO · 19 Bracket)"),
+            "The whole Bracket Showdown, live, with the host cam under the final. Run the show from /admin/brackets or chat (!win, !matchup, !bracket, !undo). 02 Game shows the matchup card and a small bracket without this. Unticking doesn't delete the scene; remove it in OBS.")
     end)
 
     section(props, "grp_chat", "Chat extras", false, function(g)
@@ -2395,8 +2419,6 @@ function script_properties()
         tip(add_int(g, "weeman_mins", "WeeMan: minutes on screen", 1, 120, 1), "How long each WeeMan stays.")
         tip(obs.obs_properties_add_bool(g, "weeman_bubbles", "WeeMan: show chat speech bubbles"),
             "What a viewer says in chat appears in a bubble above their WeeMan. This puts viewer text on your stream, so untick it to show only names.")
-        tip(obs.obs_properties_add_bool(g, "clearance_board", "Clearance board (CONTROL Resonant, chat !board)"),
-            "Adds the clearance top five to 02 Game. !board shows it for 10 seconds (30 second cooldown), only while live on Control Resonant.")
         tip(obs.obs_properties_add_bool(g, "help_card", "Commands card (chat !info)"),
             "Viewers type !info to slide up a card of the chat commands that work. On every scene except Arranging, which has its own.")
     end)
