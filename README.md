@@ -207,6 +207,21 @@ The Phoenix backend (`ivgo-ex`) listens to chat and broadcasts to the overlays. 
 | `!weemanclear` | Send every WeeMan avatar home. They walk off rather than vanishing. |
 | `!so <user>` / `!shoutout <user>` | Play one of that streamer's own Featured Clips (picked at random) in the centered panel, styled amber. Falls back to their most-viewed clip if they haven't set a featured shelf; does nothing if they have no clips. Mods are exempt from the per-viewer clip cooldown. |
 
+### Stream schedule
+
+The overlays show what's coming up, from the website's schedule, in UK time.
+
+- **Up next**, always: every ticker starts with the next scheduled stream.
+- **The week or one stream**, top left on 02 Game, 03 Camera and 17 Interview: anyone types `!schedule` to show the week for 20 seconds (once a minute; mods skip the wait). On `/admin/streams`, **Show week**, **Show on overlay** on any upcoming stream and **Hide** keep it up until hidden. A featured stream shows its website banner; any other a card. It shares the slot with the Bracket Showdown: the latest show wins.
+- **Be Right Back**: a This week strip under the clips.
+- **Ending**: the full week in the big frame, with the next stream and the next featured stream under it.
+
+The week and the banner are the website's own `/streams` components, so they always match the site.
+
+| Command | Who | What it does |
+|---|---|---|
+| `!schedule` | Anyone | Show the week ahead for 20 seconds and reply with the schedule link. Once a minute for the channel; mods skip the wait. |
+
 ### Your own commands
 
 Simple reply commands are set up on the website at `/admin/commands`: a name, a reply, on or off, and everyone or mods only. Replies can use `{user}`, `{charity}` and `{donate_link}`. One named after a built-in command, such as `donate`, replaces that reply while it's on; switch it off to get the built-in back. Each has a 30-second cooldown per viewer, which mods skip.
