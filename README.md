@@ -208,7 +208,7 @@ The Phoenix backend (`ivgo-ex`) listens to chat and broadcasts to the overlays. 
 
 ### Bracket Showdown
 
-A bracket of 16 pieces of game music, M1 to M15. Set it up and run it from `/admin/brackets` on the website: enter the 16 pieces, shuffle, start. Pieces are numbered in bracket order, so M1 is #1 v #2 and M5 is #9 v #10. Chat votes; the host picks each winner, and chat's split shows beside it. These commands only work while a bracket is live.
+A bracket of 16 pieces of game music, M1 to M15. Set it up and run it from `/admin/brackets` on the website: enter the 16 pieces best first (a poll's ranking, say), press **Seed in this order**, then start. Each piece's number is its seed, and round 1 is the standard seeded draw: M1 is #1 v #16, M2 #8 v #9, M3 #5 v #12, M4 #4 v #13, M5 #3 v #14, M6 #6 v #11, M7 #7 v #10, M8 #2 v #15, so the top two seeds can only meet in the final. **Shuffle** gives random seeds instead. Chat votes; the host picks each winner, and chat's split shows beside it. These commands only work while a bracket is live.
 
 | Command | Who | What it does |
 |---|---|---|
