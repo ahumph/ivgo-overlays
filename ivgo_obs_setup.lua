@@ -792,10 +792,44 @@ local function build_starting_soon(base, countdown_mins, socket_url, np_base)
     obs.obs_source_release(scene_src)
 end
 
+-- 02 Game's camera layout from the "Game cameras" setting: 0 for the one
+-- big cam (the usual), or 1 to 3 cams stacked down the right edge over a
+-- shorter chat, for gameplay-led shows with more than one camera.
+local function game_stack()
+    local v = settings_ref and obs.obs_data_get_string(settings_ref, "game_cams") or "classic"
+    local n = tonumber(v)
+    if n and n >= 1 and n <= 3 then return n end
+    return 0
+end
+
+-- The extra stacked cameras, placed or (when not wanted) removed.
+local function place_extra_cams(scene, stack)
+    for i = 2, 3 do
+        local name = "IVGO: Camera " .. i
+        if stack >= i then
+            local cam = make_capture(name, cam_type())
+            if cam then
+                place(scene, cam, 1590, 64 + (i - 1) * 190, 320, 180)
+                obs.obs_source_release(cam)
+            end
+        else
+            local old = obs.obs_get_source_by_name(name)
+            if old then
+                obs.obs_source_remove(old)
+                obs.obs_source_release(old)
+                print("[IVGO] Removed '" .. name .. "'")
+            end
+        end
+    end
+end
+
 local function build_game(base, socket_url, np_base)
     -- Layer order bottom → top:
     --   1. Game Capture         x:0,    y:0,   w:1920, h:1080 (fit to screen)
     --   2. Host Camera          x:1570, y:64,  w:340,  h:191  (chamfered cutout)
+    --      or, with "Game cameras" 1 to 3: Host Camera, Camera 2, Camera 3
+    --      stacked at x:1590, y:64 / 254 / 444, w:320, h:180, over a
+    --      320 x 400 chat
     --   3. 02-game.html         header + ticker chrome (transparent)
     --   4. 02-cam-outline.html  chamfered cam border frame (transparent)
     --   5. 02-chat.html         chat panel bottom-right (transparent)
@@ -811,26 +845,33 @@ local function build_game(base, socket_url, np_base)
         obs.obs_source_release(game)
     end
 
+    local stack = game_stack()
     local cam = make_capture("IVGO: Host Camera", cam_type())
     if cam then
-        place(scene, cam, 1570, 64, 340, 191)
+        if stack > 0 then
+            place(scene, cam, 1590, 64, 320, 180)
+        else
+            place(scene, cam, 1570, 64, 340, 191)
+        end
         obs.obs_source_release(cam)
     end
+    place_extra_cams(scene, stack)
+    local stack_q = stack > 0 and ("&stack=" .. stack) or ""
 
-    local overlay = make_browser("IVGO: Game Overlay",  append_socket_url(base .. "/game?mic=1", socket_url))
+    local overlay = make_browser("IVGO: Game Overlay",  append_socket_url(base .. "/game?mic=1" .. stack_q, socket_url))
     if overlay then
         configure_alert_overlay(overlay)
         place(scene, overlay, 0, 0, 1920, 1080)
         obs.obs_source_release(overlay)
     end
 
-    local cam_frame = make_silent_browser("IVGO: Cam Outline", append_socket_url(base .. "/game-cam-outline?toasts=0&sound=0", socket_url))
+    local cam_frame = make_silent_browser("IVGO: Cam Outline", append_socket_url(base .. "/game-cam-outline?toasts=0&sound=0" .. stack_q, socket_url))
     if cam_frame then
         place(scene, cam_frame, 0, 0, 1920, 1080)
         obs.obs_source_release(cam_frame)
     end
 
-    local chat = make_silent_browser("IVGO: Chat",      append_socket_url(base .. "/game-chat?toasts=0&sound=0", socket_url))
+    local chat = make_silent_browser("IVGO: Chat",      append_socket_url(base .. "/game-chat?toasts=0&sound=0" .. stack_q, socket_url))
     if chat then
         place(scene, chat, 0, 0, 1920, 1080)
         obs.obs_source_release(chat)
@@ -2299,6 +2340,7 @@ function script_defaults(settings)
     obs.obs_data_set_default_string(settings, "twitch_channel", "irishvideogameorchestra")
     obs.obs_data_set_default_bool  (settings, "clip_player", true)
     obs.obs_data_set_default_string(settings, "clip_size", "large")
+    obs.obs_data_set_default_string(settings, "game_cams", "classic")
     obs.obs_data_set_default_bool  (settings, "brb_clips", true)
     obs.obs_data_set_default_bool  (settings, "weeman_avatars", true)
     obs.obs_data_set_default_bool  (settings, "weeman_bubbles", true)
@@ -2375,6 +2417,12 @@ function script_properties()
         tip(add_text(g, "host_role", "Host role"), "Shown below your name.")
         tip(add_int(g, "countdown_mins", "Countdown (mins)", 0, 120, 1),
             "Minutes the Starting Soon countdowns start at when the scene loads. 0 to hide.")
+        local game_cams = add_list(g, "game_cams", "Game cameras", obs.OBS_COMBO_TYPE_LIST, obs.OBS_COMBO_FORMAT_STRING)
+        obs.obs_property_list_add_string(game_cams, "One big cam (usual)", "classic")
+        obs.obs_property_list_add_string(game_cams, "1 cam, stacked layout", "1")
+        obs.obs_property_list_add_string(game_cams, "2 cams, stacked", "2")
+        obs.obs_property_list_add_string(game_cams, "3 cams, stacked", "3")
+        tip(game_cams, "The stacked layout puts up to three cams down the right edge of 02 Game, 320x180 each, with a shorter chat under them and the gameplay full frame. Pick a camera for IVGO: Camera 2 and IVGO: Camera 3 after the build. Back to One big cam removes them.")
         tip(obs.obs_properties_add_bool(g, "vertical_scenes", "Vertical scenes (needs the Aitum Vertical plugin)"),
             "Also builds Starting Soon, Game, Camera, Be Right Back and Ending on Aitum Vertical's 1080x1920 canvas, linked to their main scenes so switching one switches both. Needs OBS 31.1 or later. Restart OBS after the first build so Aitum lists the new scenes.")
     end)

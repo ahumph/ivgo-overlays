@@ -213,12 +213,12 @@ A bracket of 16 pieces of game music, M1 to M15. Set it up and run it from `/adm
 | Command | Who | What it does |
 |---|---|---|
 | `!1` to `!16` | Anyone | Vote for that piece in whichever matchup it is in. One vote per viewer per matchup; the other number switches it. No chat reply. A viewer's first vote in a matchup pops a small toast. |
-| `!matchup <n>` | Mods | Show the card for matchup n on 02 Game and 03 Camera. `!matchup` alone hides it. |
-| `!win <n>` | Mods | Piece #n wins its matchup. The small bracket shows on its own 8 seconds later, for 20 seconds. |
+| `!matchup <n>` | Mods | Show the card for matchup n, in place of whatever is showing. `!matchup` alone hides it. |
+| `!win <n>` | Mods | Piece #n wins its matchup. |
 | `!undo` | Mods | Reopen the last called matchup, if the next one isn't called yet. |
-| `!bracket` | Mods | Show or hide the small bracket on 02 Game and 03 Camera. |
+| `!bracket` | Mods | Show the small bracket in place of whatever is showing, or hide it if it is showing. |
 
-The card and the small bracket take the top left of 02 Game and 03 Camera, so the watch-time board stays hidden while either shows. Test the layout with `?bracket_test=1` on `/game`, `/camera` or `/bracket`.
+One thing shows at a time, top left on 02 Game, 03 Camera and 17 Interview: a matchup's card, the small bracket, or nothing. The latest Show wins and Hide clears it; nothing comes back on its own. The admin page has the same Show matchup, Show bracket and Hide buttons, so chat commands are optional. The watch-time board stays hidden while either shows. Test the layout with `?bracket_test=1` on `/game`, `/camera` or `/bracket`.
 
 **Keep the VOD clean.** Commercial soundtracks can get the VOD muted. To keep the music off the VOD but on the live stream:
 
@@ -286,6 +286,15 @@ For the now-playing source: `http://localhost:7779/scenes/09-now-playing.html?de
 | WeeMan Avatars | Browser (`/weeman?toasts=0&egg_off=1&raid_bg_off=1&channel=...`) | 0, 0 | 1920×1080 |
 | Clip Player | Browser (`/clip?toasts=0&egg_off=1&raid_bg_off=1&channel=...&clip_size=...`) | 0, 0 | 1920×1080 |
 | Fire Overlay | Browser (`/fire?toasts=0&egg_off=1&raid_bg_off=1`) | 0, 0 | 1920×1080 |
+
+With **Game cameras** set to 1, 2 or 3 (Show section), 02 Game uses the stacked layout instead: gameplay full frame, up to three cameras down the right edge, a shorter chat under them, and no tasks pane. `?stack=N` goes on the Game Overlay, Cam Outline and Chat URLs.
+
+| Source | Type | Position | Size |
+|---|---|---|---|
+| Host Camera | Video Capture | 1590, 64 | 320×180 |
+| Camera 2 (2 or 3 cams) | Video Capture | 1590, 254 | 320×180 |
+| Camera 3 (3 cams) | Video Capture | 1590, 444 | 320×180 |
+| Chat | Browser (`/game-chat?toasts=0&stack=N`) | 0, 0 | 1920×1080 (panel at 1590, 634, 320×400) |
 
 **03 Camera**
 | Source | Type | Position | Size |
