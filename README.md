@@ -203,8 +203,13 @@ The Phoenix backend (`ivgo-ex`) listens to chat and broadcasts to the overlays. 
 | `!task clear` | Wipe all tasks (spam escape hatch). |
 | `!task del <id>` | Remove a specific task by id (id shown in the mod-only LiveView control panel). |
 | `!clipstop` / `!stopclip` / `!skipclip` | Cut off the clip that's playing right now and empty the queue. Instant — video and audio both stop. |
+| `!alerts on` / `!alerts off` | Switch channel point reward alerts on the overlay. While off, redemptions don't alert and aren't kept for later. Follows, subs, raids and donations still alert. `!alerts` says which. |
 | `!weemanclear` | Send every WeeMan avatar home. They walk off rather than vanishing. |
 | `!so <user>` / `!shoutout <user>` | Play one of that streamer's own Featured Clips (picked at random) in the centered panel, styled amber. Falls back to their most-viewed clip if they haven't set a featured shelf; does nothing if they have no clips. Mods are exempt from the per-viewer clip cooldown. |
+
+### Your own commands
+
+Simple reply commands are set up on the website at `/admin/commands`: a name, a reply, on or off, and everyone or mods only. Replies can use `{user}`, `{charity}` and `{donate_link}`. One named after a built-in command, such as `donate`, replaces that reply while it's on; switch it off to get the built-in back. Each has a 30-second cooldown per viewer, which mods skip.
 
 ### Bracket Showdown
 
