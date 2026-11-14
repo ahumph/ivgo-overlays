@@ -292,8 +292,8 @@ With **Game cameras** set to 1, 2 or 3 (Show section), 02 Game uses the stacked 
 | Source | Type | Position | Size |
 |---|---|---|---|
 | Host Camera | Video Capture | 1590, 64 | 320×180 |
-| Camera 2 (2 or 3 cams) | Video Capture | 1590, 254 | 320×180 |
-| Camera 3 (3 cams) | Video Capture | 1590, 444 | 320×180 |
+| Camera 2 (2 or 3 cams) | Browser (paste a VDO.Ninja view link in its Properties) | 1590, 254 | 320×180 |
+| Camera 3 (3 cams) | Browser (paste a VDO.Ninja view link in its Properties) | 1590, 444 | 320×180 |
 | Chat | Browser (`/game-chat?toasts=0&stack=N`) | 0, 0 | 1920×1080 (panel at 1590, 634, 320×400) |
 
 **03 Camera**

@@ -792,6 +792,28 @@ local function build_starting_soon(base, countdown_mins, socket_url, np_base)
     obs.obs_source_release(scene_src)
 end
 
+-- Remote feed for an interview (a VDO.Ninja view link, say): a browser
+-- source whose URL is pasted into its Properties once. Unlike make_browser,
+-- an existing one keeps that URL on every re-run. Its audio goes to the
+-- mixer and stays running while hidden, so the call never drops on a
+-- scene switch.
+local function make_remote_feed(name)
+    local existing = obs.obs_get_source_by_name(name)
+    if existing then return existing end
+    local d = obs.obs_data_create()
+    obs.obs_data_set_string(d, "url",           "")
+    obs.obs_data_set_int   (d, "width",         1920)
+    obs.obs_data_set_int   (d, "height",        1080)
+    obs.obs_data_set_bool  (d, "reroute_audio", true)
+    obs.obs_data_set_bool  (d, "shutdown",      false)
+    local src = obs.obs_source_create("browser_source", name, d, nil)
+    obs.obs_data_release(d)
+    if src then
+        obs.obs_source_set_monitoring_type(src, obs.OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT)
+    end
+    return src
+end
+
 -- 02 Game's camera layout from the "Game cameras" setting: 0 for the one
 -- big cam (the usual), or 1 to 3 cams stacked down the right edge over a
 -- shorter chat, for gameplay-led shows with more than one camera.
@@ -802,12 +824,23 @@ local function game_stack()
     return 0
 end
 
--- The extra stacked cameras, placed or (when not wanted) removed.
+-- The extra stacked cameras, placed or (when not wanted) removed. They are
+-- remote feeds (VDO.Ninja view links, pasted into each one's Properties
+-- once), so their sound goes to the mixer too. One left over from an
+-- earlier build as a video capture is replaced.
 local function place_extra_cams(scene, stack)
     for i = 2, 3 do
         local name = "IVGO: Camera " .. i
         if stack >= i then
-            local cam = make_capture(name, cam_type())
+            local old = obs.obs_get_source_by_name(name)
+            if old then
+                if obs.obs_source_get_id(old) ~= "browser_source" then
+                    obs.obs_source_remove(old)
+                    print("[IVGO] Replaced '" .. name .. "' with a browser source for VDO.Ninja")
+                end
+                obs.obs_source_release(old)
+            end
+            local cam = make_remote_feed(name)
             if cam then
                 place(scene, cam, 1590, 64 + (i - 1) * 190, 320, 180)
                 obs.obs_source_release(cam)
@@ -1050,28 +1083,6 @@ local function build_bracket(base, socket_url, np_base)
 
     add_shared_layers(scene, base, socket_url, np_base)
     obs.obs_source_release(scene_src)
-end
-
--- Remote feed for an interview (a VDO.Ninja view link, say): a browser
--- source whose URL is pasted into its Properties once. Unlike make_browser,
--- an existing one keeps that URL on every re-run. Its audio goes to the
--- mixer and stays running while hidden, so the call never drops on a
--- scene switch.
-local function make_remote_feed(name)
-    local existing = obs.obs_get_source_by_name(name)
-    if existing then return existing end
-    local d = obs.obs_data_create()
-    obs.obs_data_set_string(d, "url",           "")
-    obs.obs_data_set_int   (d, "width",         1920)
-    obs.obs_data_set_int   (d, "height",        1080)
-    obs.obs_data_set_bool  (d, "reroute_audio", true)
-    obs.obs_data_set_bool  (d, "shutdown",      false)
-    local src = obs.obs_source_create("browser_source", name, d, nil)
-    obs.obs_data_release(d)
-    if src then
-        obs.obs_source_set_monitoring_type(src, obs.OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT)
-    end
-    return src
 end
 
 -- The preroll / BRB video: a YouTube link plays in a browser source using
@@ -2422,7 +2433,7 @@ function script_properties()
         obs.obs_property_list_add_string(game_cams, "1 cam, stacked layout", "1")
         obs.obs_property_list_add_string(game_cams, "2 cams, stacked", "2")
         obs.obs_property_list_add_string(game_cams, "3 cams, stacked", "3")
-        tip(game_cams, "The stacked layout puts up to three cams down the right edge of 02 Game, 320x180 each, with a shorter chat under them and the gameplay full frame. Pick a camera for IVGO: Camera 2 and IVGO: Camera 3 after the build. Back to One big cam removes them.")
+        tip(game_cams, "The stacked layout puts up to three cams down the right edge of 02 Game, 320x180 each, with a shorter chat under them and the gameplay full frame. Paste a VDO.Ninja view link into the Properties of IVGO: Camera 2 and IVGO: Camera 3 after the first build; re-runs keep it. Back to One big cam removes them.")
         tip(obs.obs_properties_add_bool(g, "vertical_scenes", "Vertical scenes (needs the Aitum Vertical plugin)"),
             "Also builds Starting Soon, Game, Camera, Be Right Back and Ending on Aitum Vertical's 1080x1920 canvas, linked to their main scenes so switching one switches both. Needs OBS 31.1 or later. Restart OBS after the first build so Aitum lists the new scenes.")
     end)
