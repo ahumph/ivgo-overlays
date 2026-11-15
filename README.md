@@ -263,7 +263,7 @@ The timer on 20 Speedrun, at `/admin/speedrun` on the website. Each runner has a
 | `!timer reset` | Mods | End the run, or clear a finished one. |
 | `!timer` | Mods | Say where the timer is, with the PB and attempts. |
 
-**Who can use the page.** Editors and admins always can. Under **Who can use the timer**, an editor adds a streamer or mod by their website account's email. They can then run the timer and add or edit profiles, and see nothing else in admin. Deleting attempts or profiles and managing the list stay with editors.
+**Who can use the page.** Editors and admins always can. Under **Who can use the timer**, an editor picks a roster member from the list. Only active members with a website login are listed; link anyone missing on the roster page first. They can then run the timer and add or edit profiles, and see nothing else in admin. Deleting attempts or profiles and managing the list stay with editors.
 
 **Stream Deck.** With `SPEEDRUN_API_KEY` set on Fly, each button sends `POST https://ivgorchestra.com/api/speedrun/start` (or `split`, `undo`, `reset`) with the header `Authorization: Bearer <key>`. Split also starts the timer when nothing is showing, like LiveSplit's split key, so one button can run a whole attempt; with a finished run still showing it does nothing until Reset or Start. Use a plugin that sends web requests with headers, such as API Ninja.
 
