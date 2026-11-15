@@ -92,15 +92,25 @@ local function pull_latest()
     -- Returns ok, changed. OBS keeps running the script it loaded until it's
     -- reloaded, so a pull that brought in new code can't use it yet.
     print("[IVGO] Pulling latest…")
-    local _, before = run_git("rev-parse HEAD")
     local ok, output = run_git("pull --rebase --autostash")
     if output ~= "" then print("[IVGO] git pull:\n" .. output) end
     if not ok then
         print("[IVGO] git pull failed — check `git status` and resolve manually.")
-        return false, false
+        -- The last line git printed says why, for the panel.
+        local why = ""
+        for line in output:gmatch("[^\r\n]+") do
+            if line:match("%S") then why = line end
+        end
+        return false, why
     end
-    local _, after = run_git("rev-parse HEAD")
-    return true, before ~= after
+    return true, nil
+end
+
+-- The commit checked out now, short, or "" without git.
+local function current_head()
+    local ok, out = run_git("rev-parse --short HEAD")
+    if not ok then return "" end
+    return (out:gsub("%s+$", ""))
 end
 
 -- ── OBS source / scene helpers ────────────────────────────────────────────────
@@ -2294,46 +2304,66 @@ end
 -- hooks with the new version's, hands it the settings and hotkey, and lets
 -- the new code build the scenes. New settings fields only show in the
 -- panel after reopening Tools > Scripts.
+--
+-- What the script runs is compared with the commit on disk, not with what
+-- the pull changed, so a version pulled by hand (or a pull an earlier
+-- press made but couldn't load) still gets loaded. The panel's status line
+-- (ivgo_status) says what happened: the Script Log alone is easy to miss.
+
+ivgo_loaded_head = ivgo_loaded_head or ""
+ivgo_status = ivgo_status or ""
 
 function ivgo_build()
     build_all()
 end
 
 -- Called on the newly loaded code by the old version's ivgo_update.
-function ivgo_adopt(settings, hotkey_id)
+function ivgo_adopt(settings, hotkey_id, head)
     settings_ref = settings
     stop_clip_hotkey_id = hotkey_id
+    -- An older version hot-loading this one doesn't pass the commit.
+    ivgo_loaded_head = head or current_head()
     script_defaults(settings)
 end
 
+-- Pulls, loads what's on disk if it's newer than what's running, builds,
+-- and returns a line for the panel.
 function ivgo_update()
-    local ok, changed = pull_latest()
-    if not ok then
-        print("[IVGO] Building with the version already loaded.")
+    local pulled, why = pull_latest()
+    local head = current_head()
+
+    if head == "" or head == ivgo_loaded_head then
         build_all()
-        return
-    end
-    if not changed then
+        if not pulled then
+            print("[IVGO] Building with the version already loaded.")
+            return "Couldn't download the update (" .. (why ~= "" and why or "git failed") ..
+                   "). Scenes built with the version already loaded. See Script Log."
+        end
         print("[IVGO] Already up to date.")
-        build_all()
-        return
+        return "Up to date (" .. (head ~= "" and head or "no git") .. "). Scenes built."
     end
 
     local chunk, err = loadfile(script_path() .. "ivgo_obs_setup.lua")
     local loaded = chunk and pcall(chunk)
     if not loaded then
-        print("[IVGO] Pulled a new version but could not load it (" .. tostring(err) ..
+        print("[IVGO] Found a new version but could not load it (" .. tostring(err) ..
               "). Reload this script in Tools > Scripts, then click Update & build scenes.")
-        return
+        return "Found version " .. head .. " but couldn't load it. Reload the script in Tools > Scripts."
     end
-    print("[IVGO] Loaded the new version.")
+    print("[IVGO] Loaded version " .. head .. ".")
     -- These names now point at the new code's functions.
-    ivgo_adopt(settings_ref, stop_clip_hotkey_id)
+    ivgo_adopt(settings_ref, stop_clip_hotkey_id, head)
     ivgo_build()
+    return "Updated to " .. head .. " and built the scenes" ..
+           (pulled and "" or " (download failed, but a newer copy was on disk)") ..
+           ". Close and reopen Tools > Scripts to see new settings."
 end
 
 function script_load(settings)
     settings_ref = settings
+    -- The commit this code came from, so Update can tell when the file on
+    -- disk is newer than what's running.
+    ivgo_loaded_head = current_head()
     ensure_obs_websocket_enabled()
     maybe_start_now_playing_watcher()
 
@@ -2460,8 +2490,19 @@ function script_properties()
     -- The button calls the global below rather than a local function, so
     -- after an update hot-loads new code it runs the new version.
     tip(obs.obs_properties_add_button(props, "btn_update", "Update & build scenes",
-        function(_, _) ivgo_update(); return true end),
-        "Pulls the latest version, loads it and builds the scenes, all in one go. Without the internet it builds with the version already loaded.")
+        function(ps, _)
+            ivgo_status = ivgo_update() or ""
+            local line = obs.obs_properties_get(ps, "update_status")
+            if line then
+                obs.obs_property_set_description(line, ivgo_status)
+                obs.obs_property_set_visible(line, ivgo_status ~= "")
+            end
+            return true
+        end),
+        "Pulls the latest version, loads it and builds the scenes, all in one go. Without the internet it builds with the version already loaded. The line under it says what happened.")
+    local status_line = obs.obs_properties_add_text(props, "update_status",
+        ivgo_status, obs.OBS_TEXT_INFO or obs.OBS_TEXT_DEFAULT)
+    obs.obs_property_set_visible(status_line, ivgo_status ~= "")
 
     section(props, "grp_show", "Show", false, function(g)
         tip(add_text(g, "host_name", "Host name"), "Shown in the header bar and camera nameplate.")

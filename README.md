@@ -88,7 +88,7 @@ These appear on the right when the script is selected, in sections: Show, Interv
 
 ### Refreshing the scenes after changing settings
 
-After editing any field above, click **Update & build scenes** at the top of the script panel. It pulls the latest version first, and builds with the version already loaded if there's no internet. The script is **idempotent**. Re-running it updates existing scenes instead of duplicating them. You can run it as many times as you like; nothing gets clobbered except the bits you explicitly changed.
+After editing any field above, click **Update & build scenes** at the top of the script panel. It pulls the latest version, loads it if it's newer than what OBS is running (including a version you pulled by hand), and builds the scenes. The line under the button says what happened: up to date, updated, or why the download failed (it then builds with the version already loaded). After an update, close and reopen Tools > Scripts to see any new settings, such as a new scene's checkbox. The script is **idempotent**. Re-running it updates existing scenes instead of duplicating them. You can run it as many times as you like; nothing gets clobbered except the bits you explicitly changed.
 
 ---
 
@@ -253,7 +253,7 @@ One thing shows at a time, top left on 02 Game, 03 Camera and 17 Interview: a ma
 
 ### Speedrun timer
 
-The timer on 20 Speedrun. Set the game, category, platform and splits at `/admin/speedrun` on the website, then run it from there with the big **Start**, **Split**, **Undo** and **Reset** buttons, from chat, or from a Stream Deck. Each press is timed when it reaches the server, and the overlay counts from that start time, so refreshing the page or restarting OBS mid-run keeps the right time. The last split finishes the run; with no splits set, the first split does. The PB is the fastest finished run of the same game and category, and each split shows how far ahead (green) or behind (red) of the PB it was.
+The timer on 20 Speedrun, at `/admin/speedrun` on the website. Each runner has a **profile** (runner, game, category, platform and splits) with its own PB and attempts, so two streamers can run the same game on different days without mixing them up. Pick the active profile by hand before the run (it can't change mid-run), then run it from there with the big **Start**, **Split**, **Undo** and **Reset** buttons, from chat, or from a Stream Deck. Each press is timed when it reaches the server, and the overlay counts from that start time, so refreshing the page or restarting OBS mid-run keeps the right time. The last split finishes the run; with no splits set, the first split does. The PB is the profile's fastest finished run, and each split shows how far ahead (green) or behind (red) of the PB it was.
 
 | Command | Who | What it does |
 |---|---|---|
@@ -263,7 +263,9 @@ The timer on 20 Speedrun. Set the game, category, platform and splits at `/admin
 | `!timer reset` | Mods | End the run, or clear a finished one. |
 | `!timer` | Mods | Say where the timer is, with the PB and attempts. |
 
-**Stream Deck.** With `SPEEDRUN_API_KEY` set on Fly, each button sends `POST https://ivgorchestra.com/api/speedrun/start` (or `split`, `undo`, `reset`) with the header `Authorization: Bearer <key>`. Use a plugin that sends web requests with headers, such as API Ninja.
+**Who can use the page.** Editors and admins always can. Under **Who can use the timer**, an editor adds a streamer or mod by their website account's email. They can then run the timer and add or edit profiles, and see nothing else in admin. Deleting attempts or profiles and managing the list stay with editors.
+
+**Stream Deck.** With `SPEEDRUN_API_KEY` set on Fly, each button sends `POST https://ivgorchestra.com/api/speedrun/start` (or `split`, `undo`, `reset`) with the header `Authorization: Bearer <key>`. Split also starts the timer when nothing is showing, like LiveSplit's split key, so one button can run a whole attempt; with a finished run still showing it does nothing until Reset or Start. Use a plugin that sends web requests with headers, such as API Ninja.
 
 **For a run that counts.** Leaderboards time in real time and moderators retime from the video, so the on-screen timer is a guide. What makes the video count: the whole run, uncut, from before the first input to after the end; game audio on; the game never covered (this scene sees to that); and a copy kept. Twitch deletes past broadcasts after a while, so highlight the run or keep OBS recording locally too. Check the game's own rules on speedrun.com before you submit.
 
