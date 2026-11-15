@@ -1085,6 +1085,41 @@ local function build_bracket(base, socket_url, np_base)
     obs.obs_source_release(scene_src)
 end
 
+local function build_speedrun(base, socket_url)
+    -- Layer order bottom → top:
+    --   1. Game Capture        x:10,   y:64, w:1550, h:872 (its own clear frame)
+    --   2. Host Camera         x:1570, y:64, w:340,  h:191
+    --   3. 20-speedrun.html    header, timer, splits, run strip, chat, ticker
+    --                          (transparent; nothing drawn over the game)
+    -- None of the shared layers (WeeMan, clip player, fire, card pull, now
+    -- playing, commands card): they would cover the game, and a run's
+    -- video only counts for a leaderboard with the game uncovered.
+
+    local scene_src = get_scene_source("IVGO · 20 Speedrun")
+    local scene     = obs.obs_scene_from_source(scene_src)
+
+    local game = make_game_capture("IVGO: Game Capture")
+    if game then
+        place(scene, game, 10, 64, 1550, 872)
+        obs.obs_source_release(game)
+    end
+
+    local cam = make_capture("IVGO: Host Camera", cam_type())
+    if cam then
+        place(scene, cam, 1570, 64, 340, 191)
+        obs.obs_source_release(cam)
+    end
+
+    local overlay = make_browser("IVGO: Speedrun Overlay", append_socket_url(base .. "/speedrun?mic=1", socket_url))
+    if overlay then
+        configure_alert_overlay(overlay)
+        place(scene, overlay, 0, 0, 1920, 1080)
+        obs.obs_source_release(overlay)
+    end
+
+    obs.obs_source_release(scene_src)
+end
+
 -- The preroll / BRB video: a YouTube link plays in a browser source using
 -- YouTube's embed player; anything else is a local file for a media
 -- source. Either loops, restarts each time its scene comes on, and its
@@ -2062,10 +2097,14 @@ local function build_all()
     if bracket then
         build_bracket(base, socket_url, np_base)
     end
+    local speedrun = obs.obs_data_get_bool(settings_ref, "speedrun_scene")
+    if speedrun then
+        build_speedrun(base, socket_url)
+    end
     fit_holding_videos()
     watch_brb_audio()
 
-    local count = 7 + (interviews and (gameplay and 5 or 4) or 0) + (mahjong and 1 or 0) + (bracket and 1 or 0)
+    local count = 7 + (interviews and (gameplay and 5 or 4) or 0) + (mahjong and 1 or 0) + (bracket and 1 or 0) + (speedrun and 1 or 0)
     print("[IVGO] Done — " .. count .. " scenes created / refreshed.")
 end
 
@@ -2358,6 +2397,7 @@ function script_defaults(settings)
     obs.obs_data_set_default_int   (settings, "weeman_mins", 15)
     obs.obs_data_set_default_bool  (settings, "help_card", true)
     obs.obs_data_set_default_bool  (settings, "bracket_scene", false)
+    obs.obs_data_set_default_bool  (settings, "speedrun_scene", false)
 
     obs.obs_data_set_default_string(settings, "arr_piece",         "AERITH'S SUITE")
     obs.obs_data_set_default_string(settings, "arr_collection",    "FINAL FANTASY VII REBIRTH")
@@ -2454,7 +2494,7 @@ function script_properties()
             obs.OBS_TEXT_INFO)
     end)
 
-    section(props, "grp_other", "Two-Camera, Mahjong and Bracket", false, function(g)
+    section(props, "grp_other", "Two-Camera, Mahjong, Bracket and Speedrun", false, function(g)
         tip(add_text(g, "guest_name", "Guest name"), "The 05 Two Camera scene's guest.")
         tip(add_text(g, "guest_role", "Guest role"), "The 05 Two Camera scene's guest.")
         tip(add_text(g, "topic", "Topic"), "Shown in the topic strip of the Two-Camera scene.")
@@ -2462,6 +2502,8 @@ function script_properties()
             "A big table camera, a hand camera and chat down the right. Pick a camera for IVGO: Table Camera and IVGO: Hand Camera after the first build. Mods set the topic with !topic. Unticking doesn't delete the scene; remove it in OBS.")
         tip(obs.obs_properties_add_bool(g, "bracket_scene", "Bracket scene (IVGO · 19 Bracket)"),
             "The whole Bracket Showdown, live, with the host cam under the final. Run the show from /admin/brackets or chat (!win, !matchup, !bracket, !undo). 02 Game shows the matchup card and a small bracket without this. Unticking doesn't delete the scene; remove it in OBS.")
+        tip(obs.obs_properties_add_bool(g, "speedrun_scene", "Speedrun scene (IVGO · 20 Speedrun)"),
+            "The game in its own clear 16:9 frame, with the timer, splits and chat beside it and nothing over the game, so the video counts for a leaderboard. Run the timer from /admin/speedrun, a Stream Deck or chat (!timer start, split, undo, reset). Unticking doesn't delete the scene; remove it in OBS.")
     end)
 
     section(props, "grp_chat", "Chat extras", false, function(g)

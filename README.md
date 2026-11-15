@@ -19,6 +19,7 @@ designed to work together in OBS.
 | 07 | Arranging | Music-arranging coworking layout: display capture, host cam, Pianoteq keyboard band, task list, pomodoro timer, sliding info panel |
 | 18 | Mahjong | Opt in (Mahjong box). One-off mahjong stream: big table camera, hand camera, chat down the right, topic set by mods with `!topic` |
 | 19 | Bracket | Opt in (Bracket box). The whole Bracket Showdown, live: 16 pieces of game music, round 1 on the outside, the final under the host cam |
+| 20 | Speedrun | Opt in (Speedrun box). The game in its own clear 16:9 frame, with the timer, splits, host cam and chat down the right. Nothing is ever drawn over the game, so the video counts for a leaderboard |
 
 Extras layered on every scene:
 
@@ -62,7 +63,7 @@ This creates all the scenes and their sources automatically. Re-run it any time 
 
 ## 2 — Fill in your details
 
-These appear on the right when the script is selected, in sections: Show, Interview scenes, Two-Camera, Mahjong and Bracket, Chat extras, Arranging and Advanced. Hover over a field for what it does. All have sensible defaults, so change the ones that apply to you and leave the rest.
+These appear on the right when the script is selected, in sections: Show, Interview scenes, Two-Camera, Mahjong, Bracket and Speedrun, Chat extras, Arranging and Advanced. Hover over a field for what it does. All have sensible defaults, so change the ones that apply to you and leave the rest.
 
 | Field | What it does |
 |---|---|
@@ -122,6 +123,9 @@ In OBS, switch to each scene and right-click the listed source(s) → **Properti
 
 ### 19 Bracket scene (only if the Bracket box is ticked)
 Nothing to pick: it uses `IVGO: Host Camera`, placed above the page under the final.
+
+### 20 Speedrun scene (only if the Speedrun box is ticked)
+Nothing to pick: it uses `IVGO: Game Capture` (your capture card, for a Switch 2) and `IVGO: Host Camera`. Set the console to 1080p output.
 
 ### 07 Arranging scene
 | Source | What to pick |
@@ -247,6 +251,22 @@ One thing shows at a time, top left on 02 Game, 03 Camera and 17 Interview: a ma
 
 > The timer does **not** auto-advance when it hits zero — phase changes only happen on explicit `!pomo start` / `stop` / `reset` / `next`. This is deliberate: keeps the chat in the loop on cadence.
 
+### Speedrun timer
+
+The timer on 20 Speedrun. Set the game, category, platform and splits at `/admin/speedrun` on the website, then run it from there with the big **Start**, **Split**, **Undo** and **Reset** buttons, from chat, or from a Stream Deck. Each press is timed when it reaches the server, and the overlay counts from that start time, so refreshing the page or restarting OBS mid-run keeps the right time. The last split finishes the run; with no splits set, the first split does. The PB is the fastest finished run of the same game and category, and each split shows how far ahead (green) or behind (red) of the PB it was.
+
+| Command | Who | What it does |
+|---|---|---|
+| `!timer start` | Mods | Start a run. |
+| `!timer split` | Mods | Split. A second press within a second is ignored. |
+| `!timer undo` | Mods | Take back the last split, or bring back a run reset in the last ten minutes. |
+| `!timer reset` | Mods | End the run, or clear a finished one. |
+| `!timer` | Mods | Say where the timer is, with the PB and attempts. |
+
+**Stream Deck.** With `SPEEDRUN_API_KEY` set on Fly, each button sends `POST https://ivgorchestra.com/api/speedrun/start` (or `split`, `undo`, `reset`) with the header `Authorization: Bearer <key>`. Use a plugin that sends web requests with headers, such as API Ninja.
+
+**For a run that counts.** Leaderboards time in real time and moderators retime from the video, so the on-screen timer is a guide. What makes the video count: the whole run, uncut, from before the first input to after the end; game audio on; the game never covered (this scene sees to that); and a copy kept. Twitch deletes past broadcasts after a while, so highlight the run or keep OBS recording locally too. Check the game's own rules on speedrun.com before you submit.
+
 ---
 
 ## 6 — Re-running and tweaking later
@@ -350,6 +370,13 @@ With **Game cameras** set to 1, 2 or 3 (Show section), 02 Game uses the stacked 
 | WeeMan Avatars | Browser | 0, 0 | 1920×1080 |
 | Clip Player | Browser | 0, 0 | 1920×1080 |
 | Fire Overlay | Browser | 0, 0 | 1920×1080 |
+
+**20 Speedrun** (opt in)
+| Source | Type | Position | Size |
+|---|---|---|---|
+| Game Capture | Game / Video Capture | 10, 64 | 1550×872 |
+| Host Camera | Video Capture | 1570, 64 | 340×191 |
+| Speedrun Overlay | Browser (`/speedrun?mic=1`). Transparent; draws nothing over the game | 0, 0 | 1920×1080 |
 
 **19 Bracket** (opt in)
 | Source | Type | Position | Size |
