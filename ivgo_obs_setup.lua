@@ -2544,7 +2544,7 @@ function script_properties()
         tip(obs.obs_properties_add_bool(g, "bracket_scene", "Bracket scene (IVGO · 19 Bracket)"),
             "The whole Bracket Showdown, live, with the host cam under the final. Run the show from /admin/brackets or chat (!win, !matchup, !bracket, !undo). 02 Game shows the matchup card and a small bracket without this. Unticking doesn't delete the scene; remove it in OBS.")
         tip(obs.obs_properties_add_bool(g, "speedrun_scene", "Speedrun scene (IVGO · 20 Speedrun)"),
-            "The game in its own clear 16:9 frame, with the timer, splits and chat beside it and nothing over the game, so the video counts for a leaderboard. Run the timer from /admin/speedrun, a Stream Deck or chat (!timer start, split, undo, reset). Unticking doesn't delete the scene; remove it in OBS.")
+            "The game in its own clear 16:9 frame, with the timer, splits and chat beside it and nothing over the game, so the video counts for a leaderboard. Run the timer from ivgorchestra.com/speedruns/live, your own Stream Deck key (from My speedruns) or chat (!timer start, split, pause, undo, reset, and !timer use to pick a speedrun). Unticking doesn't delete the scene; remove it in OBS.")
     end)
 
     section(props, "grp_chat", "Chat extras", false, function(g)

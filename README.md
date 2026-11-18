@@ -253,19 +253,21 @@ One thing shows at a time, top left on 02 Game, 03 Camera and 17 Interview: a ma
 
 ### Speedrun timer
 
-The timer on 20 Speedrun, at `/admin/speedrun` on the website. Each runner has a **profile** (runner, game, category, platform and splits) with its own PB and attempts, so two streamers can run the same game on different days without mixing them up. Pick the active profile by hand before the run (it can't change mid-run), then run it from there with the big **Start**, **Split**, **Undo** and **Reset** buttons, from chat, or from a Stream Deck. Each press is timed when it reaches the server, and the overlay counts from that start time, so refreshing the page or restarting OBS mid-run keeps the right time. The last split finishes the run; with no splits set, the first split does. The PB is the profile's fastest finished run, and each split shows how far ahead (green) or behind (red) of the PB it was.
+The timer on 20 Speedrun. Runners on the active roster with a website login join a game's category at `ivgorchestra.com/speedruns`. Each entry (runner, game and category) keeps its own splits, PB and attempts, so two streamers can run the same game on different days without mixing them up. The overlay shows whichever speedrun is active. Pick yours on the live run screen, `ivgorchestra.com/speedruns/live`, before the run. It can't change while the timer is running; pause or reset it first. Then run it from there with the big **Start**, **Split**, **Pause**, **Undo** and **Reset** buttons, from chat, or from your Stream Deck. Each press is timed when it reaches the server, and the overlay counts from that start time, so refreshing the page or restarting OBS mid-run keeps the right time. The last split finishes the run; with no splits set, the first split does. The PB is the entry's fastest finished run, and each split shows how far ahead (green) or behind (red) of the PB it was.
 
 | Command | Who | What it does |
 |---|---|---|
-| `!timer start` | Mods | Start a run. |
+| `!timer start` | Mods | Start a run, or resume a paused one. |
 | `!timer split` | Mods | Split. A second press within a second is ignored. |
+| `!timer pause` | Mods | Pause, or resume if already paused. |
 | `!timer undo` | Mods | Take back the last split, or bring back a run reset in the last ten minutes. |
 | `!timer reset` | Mods | End the run, or clear a finished one. |
+| `!timer use <login> [words]` | Mods | Switch to that viewer's speedrun. The words pick the category; with none, their latest run is used. |
 | `!timer` | Mods | Say where the timer is, with the PB and attempts. |
 
-**Who can use the page.** Editors and admins always can. Under **Who can use the timer**, an editor picks a roster member from the list. Only active members with a website login are listed; link anyone missing on the roster page first. They can then run the timer and add or edit profiles, and see nothing else in admin. Deleting attempts or profiles and managing the list stay with editors.
+**Who can use the live run screen.** Editors and admins can run anyone's timer. A runner on the active roster can run their own speedrun. The account menu links to it, as does **My speedruns** (`/speedruns/me`).
 
-**Stream Deck.** With `SPEEDRUN_API_KEY` set on Fly, each button sends `POST https://ivgorchestra.com/api/speedrun/start` (or `split`, `undo`, `reset`) with the header `Authorization: Bearer <key>`. Split also starts the timer when nothing is showing, like LiveSplit's split key, so one button can run a whole attempt; with a finished run still showing it does nothing until Reset or Start. Use a plugin that sends web requests with headers, such as API Ninja.
+**Stream Deck.** Each runner makes their own key on **My speedruns**. Each button sends `POST https://ivgorchestra.com/api/speedrun/start` (or `split`, `pause`, `undo`, `reset`) with the header `Authorization: Bearer <key>`. A press only works while the runner's own speedrun is active. Split also starts the timer when nothing is showing, like LiveSplit's split key, so one button can run a whole attempt; with a finished run still showing it does nothing until Reset or Start. Use a plugin that sends web requests with headers, such as API Ninja. My speedruns has the full steps.
 
 **For a run that counts.** Leaderboards time in real time and moderators retime from the video, so the on-screen timer is a guide. What makes the video count: the whole run, uncut, from before the first input to after the end; game audio on; the game never covered (this scene sees to that); and a copy kept. Twitch deletes past broadcasts after a while, so highlight the run or keep OBS recording locally too. Check the game's own rules on speedrun.com before you submit.
 
