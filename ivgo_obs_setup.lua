@@ -1214,9 +1214,10 @@ local function parse_people(text)
 end
 
 -- The People box: "Name, Role, host" or "..., guest" per line, in screen
--- order, with ", this pc" on whoever is on this PC's camera. The role is
--- optional; a line with neither host nor guest is a guest. The words are
--- read off the end, so a role can hold commas.
+-- order, with ", this pc" on whoever is on this PC's camera and
+-- ", playing" on whoever plays the game. The role is optional; a line with
+-- neither host nor guest is a guest. The tags are read off the end, so a
+-- role can hold commas.
 local function parse_cast(text)
     local list = {}
     for line in ((text or "") .. "\n"):gmatch("(.-)\n") do
@@ -1225,18 +1226,19 @@ local function parse_cast(text)
             parts[#parts + 1] = part:match("^%s*(.-)%s*$")
         end
         -- Each tag once, so "PHOEBE, HOST, host" keeps HOST as her role.
-        local kind, pc = nil, false
+        local kind, pc, playing = nil, false, false
         while #parts > 1 do
             local word = parts[#parts]:lower()
             if (word == "host" or word == "guest") and not kind then kind = word
             elseif word == "this pc" and not pc then pc = true
+            elseif word == "playing" and not playing then playing = true
             else break end
             table.remove(parts)
         end
         kind = kind or "guest"
         local name = parts[1] or ""
         if name ~= "" then
-            list[#list + 1] = {name = name, role = table.concat(parts, ", ", 2), kind = kind, pc = pc}
+            list[#list + 1] = {name = name, role = table.concat(parts, ", ", 2), kind = kind, pc = pc, playing = playing}
         end
     end
     return list
@@ -1270,13 +1272,18 @@ local function cast_for(listed, host, host_role)
         print("[IVGO] The interview has room for " .. MAX_CAMS .. " cameras. Left out: " .. table.concat(out, ", ") .. ".")
     end
 
-    local pc_taken, used = false, {}
+    local pc_taken, playing_taken, used = false, false, {}
     for _, p in ipairs(people) do
         if p.pc and pc_taken then
             print("[IVGO] Only one person can be on this PC's camera. " .. p.name .. " gets a remote camera.")
             p.pc = false
         end
         pc_taken = pc_taken or p.pc
+        if p.playing and playing_taken then
+            print("[IVGO] Only one person can be playing. " .. p.name .. " isn't.")
+            p.playing = false
+        end
+        playing_taken = playing_taken or p.playing
         if p.pc then
             p.cam = HOST_CAM
         else
@@ -1287,6 +1294,24 @@ local function cast_for(listed, host, host_role)
         used[p.cam] = true
     end
     return people
+end
+
+-- Who plays the game: whoever is marked playing, else whoever is on this
+-- PC's camera, else nobody. They sit small on the game on Talk.
+local function player_of(people)
+    for _, p in ipairs(people) do if p.playing then return p end end
+    for _, p in ipairs(people) do if p.pc then return p end end
+    return nil
+end
+
+-- The interview's game: this PC's game capture, or a remote feed (a
+-- VDO.Ninja screen share, say) whose link is pasted into it once.
+local GAME_CAPTURE = "IVGO: Game Capture"
+local REMOTE_GAME  = "IVGO: Interview Game (Remote)"
+
+local function interview_game_source(remote)
+    if remote then return make_remote_feed(REMOTE_GAME) end
+    return make_game_capture(GAME_CAPTURE)
 end
 
 -- A small JSON reader for layouts.json (objects, arrays, strings, numbers).
@@ -1427,6 +1452,17 @@ local function keep_below(scene, item, above_name)
     end
 end
 
+-- Moves item just over the source named below_name if it sits under it.
+local function keep_above(scene, item, below_name)
+    if not item then return end
+    local mine  = scene_item_index(scene, obs.obs_source_get_name(obs.obs_sceneitem_get_source(item)))
+    local below = scene_item_index(scene, below_name)
+    if mine and below and mine < below then
+        -- Taking below's slot, once mine is out of the way, lands just over it.
+        obs.obs_sceneitem_set_order_position(item, below - 1)
+    end
+end
+
 -- Takes a source out of one scene (the source itself stays for others).
 local function remove_from_scene(scene, name)
     local items = obs.obs_scene_enum_items(scene)
@@ -1453,18 +1489,50 @@ local function remove_other_cams(scene, keep)
     end
 end
 
-local function build_interview_scene(scene_name, r, who, back, overlay, preroll, base, socket_url, np_base)
+-- Talk with the game on it: the grid for everyone but the player plus one,
+-- with the game in its lowest row's leftmost slot and the player small in
+-- the game's bottom-right corner. Must match talkGamePanel in ivgo-ex's
+-- 17-interview.html. Returns the layout and who fills its cams.
+local function talk_game_layout(golden, people, player)
+    local others = {}
+    for _, p in ipairs(people) do if p ~= player then others[#others + 1] = p end end
+    local G = golden[tostring(#others + 1)]
+    if not (G and G.cams) then
+        print("[IVGO] The layouts file has no layout '" .. (#others + 1) .. "'.")
+        return {}, others
+    end
+    local gi = 1
+    for i, c in ipairs(G.cams) do
+        local best = G.cams[gi]
+        if c[2] > best[2] or (c[2] == best[2] and c[1] < best[1]) then gi = i end
+    end
+    local g, cams = G.cams[gi], {}
+    for i, c in ipairs(G.cams) do if i ~= gi then cams[#cams + 1] = c end end
+    local r = {game = g, cams = cams}
+    if player then
+        local iw = math.floor(g[3] * 0.3 + 0.5)
+        local ih = math.floor(iw * 9 / 16 + 0.5)
+        r.inset = {g[1] + g[3] - iw - 10, g[2] + g[4] - ih - 10, iw, ih}
+    end
+    return r, others
+end
+
+local function build_interview_scene(scene_name, r, opts, back, overlay, preroll, base, socket_url, np_base)
     -- r: {preroll = rect} (Starting soon, BRB) or a golden layout,
-    -- {game = rect, cams = {rect, ...}}. who: the people in those cams,
-    -- in order (none for Starting soon and BRB).
+    -- {game = rect, cams = {rect, ...}, inset = rect}. opts.who: the people
+    -- in those cams, in order (none for Starting soon and BRB); opts.inset:
+    -- the person small on the game; opts.remote_game: the game is a remote
+    -- feed rather than this PC's game capture.
     -- Layer order bottom -> top, each only where r has a place for it:
     --   1. 17-interview.html?layer=back   branded background
     --   2. Preroll video
-    --   3. Game Capture
+    --   3. The game
     --   4. Each person's camera, in the slot for their place in who
-    --   5. 17-interview.html   frames, nameplates, chat, donations, chrome
+    --   5. The player's camera, small on the game
+    --   6. 17-interview.html   frames, nameplates, chat, donations, chrome
     -- Sources the layout has no place for come out of the scene, so a show
     -- with fewer people leaves no empty frames behind.
+    opts = opts or {}
     local scene_src = get_scene_source(scene_name)
     local scene     = obs.obs_scene_from_source(scene_src)
     local above     = obs.obs_source_get_name(overlay)
@@ -1474,6 +1542,7 @@ local function build_interview_scene(scene_name, r, who, back, overlay, preroll,
         local item = place(scene, source, rect[1], rect[2], rect[3], rect[4])
         keep_below(scene, item, above)
         obs.obs_source_release(source)
+        return item
     end
 
     place(scene, back, 0, 0, 1920, 1080)
@@ -1481,18 +1550,25 @@ local function build_interview_scene(scene_name, r, who, back, overlay, preroll,
         put(obs.obs_source_get_ref(preroll), r.preroll)
     end
 
+    local game_name = opts.remote_game and REMOTE_GAME or GAME_CAPTURE
+    remove_from_scene(scene, opts.remote_game and GAME_CAPTURE or REMOTE_GAME)
     if r.game then
-        put(make_game_capture("IVGO: Game Capture"), r.game)
+        put(interview_game_source(opts.remote_game), r.game)
     else
-        remove_from_scene(scene, "IVGO: Game Capture")
+        remove_from_scene(scene, game_name)
     end
 
     local cams, keep = r.cams or {}, {}
-    for i, p in ipairs(who or {}) do
+    for i, p in ipairs(opts.who or {}) do
         if cams[i] then
             keep[p.cam] = true
             put(person_cam_source(p), cams[i])
         end
+    end
+    if r.inset and opts.inset then
+        keep[opts.inset.cam] = true
+        -- Over the game, even when the game was added after this camera.
+        keep_above(scene, put(person_cam_source(opts.inset), r.inset), game_name)
     end
     remove_other_cams(scene, keep)
 
@@ -1536,9 +1612,9 @@ local VERTICAL_LAYOUTS = {
 -- Which person goes in each vertical slot, as 17-interview.html's vTop
 -- and friends, by list order among the hosts. Welcome: the second host on
 -- top and the first under them. Talk: the second host (or the only one)
--- and the first guest, with the first host inset on the game when they
--- aren't one of the two. No game, no game or inset.
-local function vertical_people(layout, hosts, guests, gameplay)
+-- and the first guest, with the player inset on the game when they aren't
+-- one of the two. No game, no game or inset.
+local function vertical_people(layout, hosts, guests, gameplay, player)
     local top = hosts[2] or hosts[1]
     if layout == "welcome" then
         return {top = top, bottom = hosts[2] and hosts[1] or nil}
@@ -1547,7 +1623,7 @@ local function vertical_people(layout, hosts, guests, gameplay)
         return {
             top    = top,
             bottom = guests[1],
-            inset  = gameplay and top ~= hosts[1] and hosts[1] or nil,
+            inset  = gameplay and player and player ~= top and player ~= guests[1] and player or nil,
             game   = gameplay,
         }
     end
@@ -1659,7 +1735,7 @@ local function make_vertical_overlay(name, url)
     return src
 end
 
-local function build_vertical_interview(base, params, preroll, socket_url, hosts, guests, gameplay)
+local function build_vertical_interview(base, params, preroll, socket_url, hosts, guests, gameplay, player, remote_game)
     local canvas, width, height = open_vertical_canvas()
     if not canvas then return end
 
@@ -1689,15 +1765,16 @@ local function build_vertical_interview(base, params, preroll, socket_url, hosts
             local scene, scene_src = get_vertical_scene(canvas, vertical_name)
             if scene then
                 local r = VERTICAL_LAYOUTS[layout]
-                local who = vertical_people(layout, hosts, guests, gameplay)
+                local who = vertical_people(layout, hosts, guests, gameplay, player)
                 place(scene, back, 0, 0, 1080, 1920)
                 place_fill(scene, preroll, r.preroll)
+                remove_from_scene(scene, remote_game and GAME_CAPTURE or REMOTE_GAME)
                 if who.game then
-                    local game = make_game_capture("IVGO: Game Capture")
+                    local game = interview_game_source(remote_game)
                     place_fill(scene, game, r.game)
                     if game then obs.obs_source_release(game) end
                 else
-                    remove_from_scene(scene, "IVGO: Game Capture")
+                    remove_from_scene(scene, remote_game and REMOTE_GAME or GAME_CAPTURE)
                 end
                 local used = {}
                 for _, slot in ipairs({"top", "bottom", "inset"}) do
@@ -1840,7 +1917,7 @@ local function build_vertical_main(base, host, host_role, countdown_mins, socket
           "the Aitum Vertical dock yet, restart OBS.")
 end
 
-local function build_interview(base, people, gameplay, preroll_video, countdown_mins, socket_url, np_base, vertical)
+local function build_interview(base, people, gameplay, talk_game, remote_game, preroll_video, countdown_mins, socket_url, np_base, vertical)
     -- Up to five scenes, one overlay: starting soon, welcome (the hosts),
     -- talk (everyone), game (everyone and the game, only with gameplay
     -- ticked) and be right back. Welcome, Talk and Game take the golden
@@ -1862,13 +1939,18 @@ local function build_interview(base, people, gameplay, preroll_video, countdown_
         if p.kind == "host" then hosts[#hosts + 1] = p else guests[#guests + 1] = p end
     end
 
+    local player = player_of(people)
+    talk_game = gameplay and talk_game
+
     -- The page reads the people in this same order.
     local params = "mins=" .. tostring(countdown_mins) .. "&mic=1&egg_off=1"
     for i, p in ipairs(people) do
         params = params .. "&" .. p.kind .. "=" .. urlencode(p.name .. "|" .. p.role)
         if p.pc then params = params .. "&pc=" .. i end
+        if p.playing then params = params .. "&play=" .. i end
     end
     if gameplay then params = params .. "&game=1" end
+    if talk_game then params = params .. "&talkgame=1" end
 
     local back = make_browser("IVGO: Interview Background", base .. "/interview?layer=back")
     local overlay = make_browser("IVGO: Interview Overlay", append_socket_url(base .. "/interview?" .. params, socket_url))
@@ -1896,15 +1978,21 @@ local function build_interview(base, people, gameplay, preroll_video, countdown_
         return L or {}
     end
 
-    build_interview_scene("IVGO · 17 Interview · Starting Soon", INTERVIEW_LAYOUTS.starting, nil, back, overlay, preroll, base, socket_url, np_base)
-    build_interview_scene("IVGO · 17 Interview · Welcome",       panel(tostring(#hosts)), hosts, back, overlay, preroll, base, socket_url, np_base)
-    build_interview_scene("IVGO · 17 Interview · Talk",          panel(tostring(#people)), people, back, overlay, preroll, base, socket_url, np_base)
-    if gameplay then
-        build_interview_scene("IVGO · 17 Interview · Game",      panel(#people .. "+game"), people, back, overlay, preroll, base, socket_url, np_base)
+    local function opts(who, inset)
+        return {who = who, inset = inset, remote_game = remote_game}
     end
-    build_interview_scene("IVGO · 17 Interview · Be Right Back", INTERVIEW_LAYOUTS.brb, nil, back, overlay, preroll, base, socket_url, np_base)
+    local talk, talk_who = panel(tostring(#people)), people
+    if talk_game then talk, talk_who = talk_game_layout(golden, people, player) end
 
-    if vertical then build_vertical_interview(base, params, preroll, socket_url, hosts, guests, gameplay) end
+    build_interview_scene("IVGO · 17 Interview · Starting Soon", INTERVIEW_LAYOUTS.starting, opts(), back, overlay, preroll, base, socket_url, np_base)
+    build_interview_scene("IVGO · 17 Interview · Welcome",       panel(tostring(#hosts)), opts(hosts), back, overlay, preroll, base, socket_url, np_base)
+    build_interview_scene("IVGO · 17 Interview · Talk",          talk, opts(talk_who, player), back, overlay, preroll, base, socket_url, np_base)
+    if gameplay then
+        build_interview_scene("IVGO · 17 Interview · Game",      panel(#people .. "+game"), opts(people), back, overlay, preroll, base, socket_url, np_base)
+    end
+    build_interview_scene("IVGO · 17 Interview · Be Right Back", INTERVIEW_LAYOUTS.brb, opts(), back, overlay, preroll, base, socket_url, np_base)
+
+    if vertical then build_vertical_interview(base, params, preroll, socket_url, hosts, guests, gameplay, player, remote_game) end
 
     if preroll then obs.obs_source_release(preroll) end
     obs.obs_source_release(back)
@@ -2252,7 +2340,10 @@ local function build_all()
     if interviews then
         -- No hosts typed in: the show's host on this PC's camera, first.
         local people = cast_for(parse_cast(obs.obs_data_get_string(settings_ref, "interview_people")), host, host_role)
-        build_interview(base, people, gameplay, preroll_video, countdown_mins, socket_url, np_base,
+        build_interview(base, people, gameplay,
+                        obs.obs_data_get_bool(settings_ref, "interview_talk_game"),
+                        obs.obs_data_get_string(settings_ref, "interview_game_source") == "remote",
+                        preroll_video, countdown_mins, socket_url, np_base,
                         obs.obs_data_get_bool(settings_ref, "vertical_interview"))
     elseif obs.obs_data_get_bool(settings_ref, "vertical_interview") then
         print("[IVGO] Vertical interview scenes need Interview scenes ticked too. Skipped.")
@@ -2578,6 +2669,8 @@ function script_defaults(settings)
     obs.obs_data_set_default_string(settings, "interview_people",
         "GUEST NAME, SPECIAL GUEST, guest\nADAM HUMPHREYS, ARTISTIC DIRECTOR, host, this pc\nPHOEBE, HOST, host")
     obs.obs_data_set_default_bool  (settings, "interview_game",   true)
+    obs.obs_data_set_default_bool  (settings, "interview_talk_game", false)
+    obs.obs_data_set_default_string(settings, "interview_game_source", "pc")
     obs.obs_data_set_default_string(settings, "preroll_video",    "")
     obs.obs_data_set_default_int   (settings, "countdown_mins", 5)
     obs.obs_data_set_default_string(settings, "socket_url", "wss://ivgorchestra.fly.dev/overlay")
@@ -2687,9 +2780,15 @@ function script_properties()
 
     section(props, "interview_scenes", "Interview scenes (IVGO · 17 Interview)", true, function(g)
         tip(add_lines(g, "interview_people", "People, in screen order: Name, Role, host or guest"),
-            "One person per line, top to bottom in the order they appear on Talk and Game. Welcome shows only the hosts, in the same order. Add \", this pc\" to whoever is on this PC's camera (IVGO: Host Camera). The role shows on their nameplate and is optional. To reorder, move the lines and build again.")
+            "One person per line, top to bottom in the order they appear on Talk and Game. Welcome shows only the hosts, in the same order. Add \", this pc\" to whoever is on this PC's camera (IVGO: Host Camera), and \", playing\" to whoever plays the game (without it, the this pc person). The role shows on their nameplate and is optional. To reorder, move the lines and build again.")
         tip(obs.obs_properties_add_bool(g, "interview_game", "Gameplay or screen share"),
             "Adds the Game scene: the game or a screen share large, with everyone's cameras beside it.")
+        tip(obs.obs_properties_add_bool(g, "interview_talk_game", "Game on Talk too"),
+            "Talk keeps the cameras large and puts the game in the bottom-left slot, with whoever is playing small in its corner. Needs Gameplay or screen share.")
+        local game_from = add_list(g, "interview_game_source", "Game comes from", obs.OBS_COMBO_TYPE_LIST, obs.OBS_COMBO_FORMAT_STRING)
+        obs.obs_property_list_add_string(game_from, "This PC (IVGO: Game Capture)", "pc")
+        obs.obs_property_list_add_string(game_from, "A remote link (IVGO: Interview Game (Remote))", "remote")
+        tip(game_from, "A remote game is a browser source, like the remote cameras: after a build, paste the screen share's VDO.Ninja view link into IVGO: Interview Game (Remote). Re-runs keep it. Only the interview scenes use it.")
         tip(add_text(g, "preroll_video", "Preroll video"),
             "A YouTube link, or the full path of a video file. Plays on the interview's Starting Soon and Be Right Back.")
         tip(obs.obs_properties_add_bool(g, "vertical_interview", "Vertical interview scenes (needs the Aitum Vertical plugin)"),
