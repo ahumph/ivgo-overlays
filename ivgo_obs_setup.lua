@@ -1614,18 +1614,30 @@ local VERTICAL_LAYOUTS = {
 -- top and the first under them. Talk: the second host (or the only one)
 -- and the first guest, with the player inset on the game when they aren't
 -- one of the two. No game, no game or inset.
+-- Welcome: the first two hosts, in list order, top to bottom. Talk: the
+-- first guest on top (no guest: the second host) and the first host under
+-- them. With the game on, the player is the inset on it and the two big
+-- boxes go to the others, as on the main Talk. Matches
+-- 17-interview.html's vertical layout.
 local function vertical_people(layout, hosts, guests, gameplay, player)
-    local top = hosts[2] or hosts[1]
     if layout == "welcome" then
-        return {top = top, bottom = hosts[2] and hosts[1] or nil}
+        return {top = hosts[1], bottom = hosts[2]}
     end
     if layout == "talk" then
-        return {
-            top    = top,
-            bottom = guests[1],
-            inset  = gameplay and player and player ~= top and player ~= guests[1] and player or nil,
-            game   = gameplay,
-        }
+        local inset = gameplay and player or nil
+        local function others(list)
+            local out = {}
+            for _, p in ipairs(list) do
+                if p ~= inset then table.insert(out, p) end
+            end
+            return out
+        end
+        local h, g = others(hosts), others(guests)
+        local top = g[1] or h[2] or h[1]
+        local bottom = top ~= h[1] and h[1] or nil
+        -- The player alone: they take the top box, no inset.
+        if not top then top, inset = inset, nil end
+        return {top = top, bottom = bottom, inset = inset, game = gameplay}
     end
     return {}
 end
